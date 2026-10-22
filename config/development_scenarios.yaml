@@ -1,0 +1,55 @@
+# 仅用于开发和自动测试，不代表正式比赛参数。
+
+schema_version: 1
+# 开发ArUco字典、尺寸和ID映射只在competition_parameters.yaml的development.aruco中维护。
+
+# 开发救援几何。坐标约定和公式见docs/marker_and_rescue_geometry.md：
+# 偏移沿目标坐标系x_T（Marker正面法线）和y_T；lateral_offsets_m[i]对应救援区i。
+# version必须与competition_parameters.yaml中development.rescue.geometry_version一致。
+rescue_geometry:
+  version: "development-v1"
+  zone_orientation: "face_marker"
+  normal:
+    forward_offset_m: 0.50
+  cooperative:
+    forward_offset_m: 0.50
+    lateral_offsets_m: [-0.30, 0.30]
+
+scenarios:
+  - id: "S01_single_robot_task1"
+    purpose: "robot_1自主探索、建图、识别并冻结目标"
+    robots: ["robot_1", "robot_2"]
+    mapping_robot: "robot_1"
+    expected_targets: ["T1", "T2", "T3", "TC1"]
+
+  - id: "S02_duplicate_observation"
+    purpose: "同一目标的多帧和多机器人观测只能生成一个目标"
+    expected_unique_targets: ["T1"]
+
+  - id: "S03_navigation_failure"
+    purpose: "目标不可达时导航失败并保持安全停车"
+    expected_reason_code: 100
+
+  - id: "S04_cooperative_dwell_reset"
+    purpose: "任意机器人离开协同救援区后停留计时清零"
+    target: "TC1"
+    robots: ["robot_1", "robot_2"]
+
+  - id: "S05_mission_dependency_graph"
+    purpose: "验证T2之后并行T1/T3，再执行TC1"
+    mission_fixture: "examples/interfaces/mission_plan.example.json"
+
+  - id: "S06_phase_freeze_and_estop"
+    purpose: "阶段冻结和独立急停停止全部在线机器人"
+    robots: ["robot_1", "robot_2"]
+
+  - id: "S07_mission_rejected"
+    purpose: "引用未知目标或存在循环依赖的指令被验证器拒绝，记录原因且不产生任何机器人动作"
+    mission_fixture: "examples/interfaces/mission_intake_rejected.example.json"
+    expected_issue_codes: [102]
+
+  - id: "S08_reset_and_relocalize"
+    purpose: "Task 2A中对robot_1执行重置BEGIN/COMPLETE，重新定位成功前不得参与分配"
+    robots: ["robot_1", "robot_2"]
+    reset_robot: "robot_1"
+    relocalize_mode: "known_start_pose"

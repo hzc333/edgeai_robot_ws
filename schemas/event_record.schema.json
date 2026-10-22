@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edgeai.local/schemas/event-record-v1.schema.json",
+  "title": "Edge AI机器人挑战赛运行事件记录",
+  "description": "runs/<run_id>/events.jsonl中的一行。日志器（P2）是唯一写入方，按接受顺序追加，不修改已写入行。seq在一次运行内从1开始严格递增，给出跨阶段的全序。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "seq",
+    "event_id",
+    "ros_time_ns",
+    "wall_time",
+    "source_node",
+    "phase",
+    "scoring_stage",
+    "category",
+    "type",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "$ref": "#/$defs/nonEmptyString" },
+    "seq": { "type": "integer", "minimum": 1 },
+    "event_id": {
+      "description": "来源消息自带的event_id；来源没有ID时由日志器生成。",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "ros_time_ns": {
+      "description": "来源消息header.stamp，单位纳秒；停留时长等计算只能使用该字段。",
+      "type": "integer",
+      "minimum": 0
+    },
+    "wall_time": {
+      "description": "日志器写入时的UTC墙上时间，仅供人工对照。",
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_node": { "$ref": "#/$defs/nonEmptyString" },
+    "phase": { "$ref": "#/$defs/phase" },
+    "scoring_stage": { "enum": ["none", "task1", "task2a", "task2b"] },
+    "category": {
+      "enum": [
+        "phase",
+        "estop",
+        "reset",
+        "localization",
+        "map",
+        "target",
+        "rescue",
+        "mission",
+        "fault",
+        "operator"
+      ]
+    },
+    "type": {
+      "description": "事件类型，取对应ROS消息常量名的小写形式，例如rescue类别的event_completed。",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "category": { "const": "rescue" } } },
+      "then": {
+        "properties": {
+          "scoring_stage": { "enum": ["task2a", "task2b"] },
+          "payload": { "$ref": "#/$defs/rescuePayload" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "phase" } } },
+      "then": {
+        "properties": { "payload": { "$ref": "#/$defs/phasePayload" } }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "mission" } } },
+      "then": {
+        "properties": {
+          "scoring_stage": { "const": "task2b" },
+          "payload": {
+            "type": "object",
+            "required": ["mission_id"],
+            "properties": { "mission_id": { "$ref": "#/$defs/nonEmptyString" } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "reset" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["reset_id", "action", "robot_ids", "approved_by", "reset_count"],
+            "properties": {
+              "reset_id": { "$ref": "#/$defs/nonEmptyString" },
+              "action": { "enum": ["begin", "complete", "abort"] },
+              "robot_ids": { "type": "array", "items": { "$ref": "#/$defs/robotId" } },
+              "approved_by": { "$ref": "#/$defs/nonEmptyString" },
+              "reset_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "robotId": { "type": "string", "pattern": "^robot_[1-4]$" },
+    "phase": {
+      "enum": [
+        "preparation",
+        "task1",
+        "handover",
+        "task2a",
+        "frozen",
+        "task2b",
+        "finished",
+        "estop"
+      ]
+    },
+    "point2d": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "phasePayload": {
+      "type": "object",
+      "required": ["from_phase", "to_phase", "phase_sequence", "requester_type"],
+      "properties": {
+        "from_phase": { "$ref": "#/$defs/phase" },
+        "to_phase": { "$ref": "#/$defs/phase" },
+        "phase_sequence": { "type": "integer", "minimum": 0 },
+        "requester_type": { "enum": ["operator", "system"] },
+        "requester_node": { "type": "string" }
+      }
+    },
+    "rescuePayload": {
+      "description": "与RescueEvent.msg对应。robot_ids、rescue_zone_indices与robot_positions按下标对应。",
+      "type": "object",
+      "required": [
+        "task_id",
+        "target_id",
+        "target_type",
+        "mission_id",
+        "step_id",
+        "robot_ids",
+        "rescue_zone_indices",
+        "robot_positions",
+        "dwell_elapsed_s",
+        "reason_code"
+      ],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/nonEmptyString" },
+        "target_id": { "$ref": "#/$defs/nonEmptyString" },
+        "target_type": { "enum": ["normal", "cooperative"] },
+        "mission_id": { "type": "string" },
+        "step_id": { "type": "string" },
+        "robot_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/robotId" }
+        },
+        "rescue_zone_indices": {
+          "type": "array",
+          "maxItems": 2,
+          "items": { "type": "integer", "minimum": 0, "maximum": 1 }
+        },
+        "robot_positions": {
+          "type": "array",
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/point2d" }
+        },
+        "dwell_elapsed_s": { "type": "number", "minimum": 0 },
+        "reason_code": { "type": "integer", "minimum": 0 },
+        "reason_detail": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "run_id": "run-20261022T120000Z-1a2b3c4d",
+  "generated_at": "2026-10-22T11:50:00Z",
+  "environment": "system_ros",
+  "ros_distro": "jazzy",
+  "rmw_implementation": "rmw_cyclonedds_cpp",
+  "lockfile_sha256": null,
+  "git": {
+    "commit": "27f2f16000000000000000000000000000000000",
+    "branch": "main",
+    "dirty": false
+  },
+  "packages": [
+    {
+      "name": "edgeai_robot_interfaces",
+      "version": "0.2.0",
+      "origin": "workspace"
+    },
+    {
+      "name": "slam_toolbox",
+      "version": "2.8.3",
+      "origin": "third_party"
+    }
+  ],
+  "models": []
+}

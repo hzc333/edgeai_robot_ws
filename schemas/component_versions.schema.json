@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edgeai.local/schemas/component-versions-v1.schema.json",
+  "title": "Edge AI机器人挑战赛组件版本记录",
+  "description": "runs/<run_id>/system/component_versions.json，在PREPARATION阶段生成，用于复现运行和满足规则第10章第三方组件说明。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "generated_at",
+    "environment",
+    "ros_distro",
+    "rmw_implementation",
+    "lockfile_sha256",
+    "git",
+    "packages",
+    "models"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "$ref": "#/$defs/nonEmptyString" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "environment": { "enum": ["pixi", "system_ros"] },
+    "ros_distro": { "const": "jazzy" },
+    "rmw_implementation": { "$ref": "#/$defs/nonEmptyString" },
+    "lockfile_sha256": {
+      "description": "pixi.lock的哈希；environment为system_ros时为null。",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }]
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "branch", "dirty"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "branch": { "type": "string" },
+        "dirty": { "type": "boolean" }
+      }
+    },
+    "packages": {
+      "description": "工作空间包及关键第三方包（Nav2、SLAM Toolbox、OpenCV等）。",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version", "origin"],
+        "properties": {
+          "name": { "$ref": "#/$defs/nonEmptyString" },
+          "version": { "$ref": "#/$defs/nonEmptyString" },
+          "origin": { "enum": ["workspace", "third_party"] }
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version", "runtime", "sha256", "purpose"],
+        "properties": {
+          "name": { "$ref": "#/$defs/nonEmptyString" },
+          "version": { "$ref": "#/$defs/nonEmptyString" },
+          "runtime": { "$ref": "#/$defs/nonEmptyString" },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "purpose": { "enum": ["mission_interpreter", "perception", "other"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

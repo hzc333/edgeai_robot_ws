@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_id": "run-20261022T120000Z-1a2b3c4d",
+  "mission_id": "mission-3a4b5c6d",
+  "received_at": "2026-10-22T12:30:00Z",
+  "original_instruction": "救援T9。",
+  "model": {
+    "name": "本地模型占位符",
+    "version": "尚未选择",
+    "prompt_version": "prompt-v0"
+  },
+  "raw_model_output": "{\"steps\": [{\"step_id\": \"step-t9\", \"action\": \"rescue\", \"target_id\": \"T9\", \"priority\": 0, \"predecessor_step_ids\": []}]}",
+  "outcome": "rejected_by_validator",
+  "candidate_steps": [
+    {
+      "step_id": "step-t9",
+      "action": "rescue",
+      "target_id": "T9",
+      "priority": 0,
+      "predecessor_step_ids": []
+    }
+  ],
+  "issues": [
+    {
+      "code": 102,
+      "code_name": "unknown_target",
+      "step_id": "step-t9",
+      "target_id": "T9",
+      "detail": "T9不在冻结目标注册表（target_revision=7）中"
+    }
+  ],
+  "validated_plan": null
+}

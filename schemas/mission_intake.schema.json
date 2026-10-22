@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edgeai.local/schemas/mission-intake-v1.schema.json",
+  "title": "Edge AI机器人挑战赛Task 2B指令接收与验证记录",
+  "description": "每条组织方指令对应一个task2b/mission_intake.json（或按mission_id分文件），由日志器根据/edge/mission_intake落盘。满足规则6.7/6.9对原始指令、模型版本、解析结果及无效原因的记录要求。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "mission_id",
+    "received_at",
+    "original_instruction",
+    "model",
+    "raw_model_output",
+    "outcome",
+    "candidate_steps",
+    "issues",
+    "validated_plan"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "$ref": "#/$defs/nonEmptyString" },
+    "mission_id": { "$ref": "#/$defs/nonEmptyString" },
+    "received_at": { "type": "string", "format": "date-time" },
+    "original_instruction": { "$ref": "#/$defs/nonEmptyString" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "prompt_version"],
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/nonEmptyString" },
+        "prompt_version": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "raw_model_output": {
+      "description": "模型原始文本输出，不做任何修改；调用模型前即失败时为空字符串。",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": ["interpretation_failed", "rejected_by_validator", "accepted"]
+    },
+    "candidate_steps": {
+      "description": "解释器提交给验证器的候选步骤；interpretation_failed时为空数组。",
+      "type": "array",
+      "items": {
+        "$ref": "https://edgeai.local/schemas/mission-plan-v2.schema.json#/$defs/step"
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/issue" }
+    },
+    "validated_plan": {
+      "description": "accepted时为写入task2b/mission_plan.json的相对路径及哈希，其他情况为null。",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "accepted" } } },
+      "then": {
+        "properties": {
+          "validated_plan": { "type": "object" },
+          "candidate_steps": { "minItems": 1 }
+        }
+      },
+      "else": {
+        "properties": {
+          "validated_plan": { "type": "null" },
+          "issues": { "minItems": 1 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "issue": {
+      "description": "与MissionValidationIssue.msg一一对应；code_name为常量名去掉CODE_前缀后的小写形式。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "code_name", "step_id", "target_id", "detail"],
+      "properties": {
+        "code": { "type": "integer", "minimum": 0 },
+        "code_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "step_id": { "type": "string" },
+        "target_id": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "run_id": "run-20261022T120000Z-1a2b3c4d",
+  "mission_id": "mission-9c0d1e2f",
+  "received_at": "2026-10-22T12:09:55Z",
+  "original_instruction": "先救援T2；T2完成后救援T1和T3；两者都完成后，协同救援TC1。",
+  "model": {
+    "name": "本地模型占位符",
+    "version": "尚未选择",
+    "prompt_version": "prompt-v0"
+  },
+  "raw_model_output": "{\"steps\": [{\"step_id\": \"step-t2\", \"action\": \"rescue\", \"target_id\": \"T2\", \"priority\": 0, \"predecessor_step_ids\": []}, {\"step_id\": \"step-t1\", \"action\": \"rescue\", \"target_id\": \"T1\", \"priority\": 0, \"predecessor_step_ids\": [\"step-t2\"]}, {\"step_id\": \"step-t3\", \"action\": \"rescue\", \"target_id\": \"T3\", \"priority\": 0, \"predecessor_step_ids\": [\"step-t2\"]}, {\"step_id\": \"step-tc1\", \"action\": \"rescue\", \"target_id\": \"TC1\", \"priority\": 0, \"predecessor_step_ids\": [\"step-t1\", \"step-t3\"]}]}",
+  "outcome": "accepted",
+  "candidate_steps": [
+    {
+      "step_id": "step-t2",
+      "action": "rescue",
+      "target_id": "T2",
+      "priority": 0,
+      "predecessor_step_ids": []
+    },
+    {
+      "step_id": "step-t1",
+      "action": "rescue",
+      "target_id": "T1",
+      "priority": 0,
+      "predecessor_step_ids": [
+        "step-t2"
+      ]
+    },
+    {
+      "step_id": "step-t3",
+      "action": "rescue",
+      "target_id": "T3",
+      "priority": 0,
+      "predecessor_step_ids": [
+        "step-t2"
+      ]
+    },
+    {
+      "step_id": "step-tc1",
+      "action": "rescue",
+      "target_id": "TC1",
+      "priority": 0,
+      "predecessor_step_ids": [
+        "step-t1",
+        "step-t3"
+      ]
+    }
+  ],
+  "issues": [],
+  "validated_plan": {
+    "path": "task2b/mission_plan.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

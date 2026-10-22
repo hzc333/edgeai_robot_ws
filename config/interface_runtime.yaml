@@ -1,0 +1,138 @@
+# 团队内部统一的运行时接口参数。所有值均为开发基线；如果官方规则
+# 给出更严格要求，由competition_parameters.yaml中的official值覆盖。
+
+schema_version: 1
+
+identity:
+  run_id:
+    owner_node: "/edge/system_manager"
+    created_in_phase: "PREPARATION"
+    format: "run-<UTC YYYYMMDDTHHMMSSZ>-<8 hex>"
+    immutable_until: "FINISHED"
+  map_id:
+    owner_node: "/edge/map_manager"
+    created_when: "a new mapping session starts"
+    format: "map-<8 hex>"
+  revisions:
+    map_revision_initial: 0
+    map_revision_increment: "map reset/replacement or persisted authoritative snapshot"
+    target_revision_initial: 0
+    target_revision_increment: "each accepted authoritative target-registry change"
+
+frames:
+  global: "map"
+  robot_prefix_format: "robot_<N>/"
+  odom_suffix: "odom"
+  base_footprint_suffix: "base_footprint"
+  base_link_suffix: "base_link"
+  lidar_suffix: "lidar_link"
+  camera_suffix: "camera_link"
+  camera_optical_suffix: "camera_optical_frame"
+
+rates_hz:
+  robot_state: 10.0
+  competition_state_heartbeat: 1.0
+  robot_phase_ack_until_accepted: 2.0
+  exploration_status: 1.0
+  target_registry_heartbeat: 0.2
+
+timeouts_s:
+  velocity_command: 0.50
+  robot_state_stale: 1.00
+  edge_connection: 1.00
+  phase_ack: 3.00
+  tf_lookup: 0.20
+  observation_tf_retry_window: 0.50
+  navigation_default: 60.0
+  validate_mission: 5.0
+  relocalize_default: 30.0
+  cancel_ack: 1.00
+  safe_stop_ack: 2.00
+
+qos:
+  sensor_data:
+    reliability: "best_effort"
+    durability: "volatile"
+    history: "keep_last"
+    depth: 5
+  robot_state:
+    reliability: "reliable"
+    durability: "volatile"
+    history: "keep_last"
+    depth: 1
+  snapshot:
+    reliability: "reliable"
+    durability: "transient_local"
+    history: "keep_last"
+    depth: 1
+  control_state:
+    reliability: "reliable"
+    durability: "transient_local"
+    history: "keep_last"
+    depth: 1
+  event_stream:
+    reliability: "reliable"
+    durability: "volatile"
+    history: "keep_last"
+    depth: 1000
+
+topics:
+  competition_state: "/competition/state"
+  emergency_stop: "/competition/estop"
+  exploration_status: "/edge/exploration_status"
+  targets: "/edge/targets"
+  robot_states: "/edge/robot_states"
+  rescue_tasks: "/edge/rescue_tasks"
+  rescue_events: "/edge/rescue_events"
+  mission_plan: "/edge/mission_plan"
+  mission_intake: "/edge/mission_intake"
+  mission_state: "/edge/mission_state"
+  diagnostics: "/diagnostics"
+
+services:
+  set_phase: "/competition/set_phase"
+  request_reset: "/competition/request_reset"
+  submit_mission: "/edge/submit_mission"
+  validate_mission: "/edge/validate_mission"
+  finalize_task1: "/edge/finalize_task1"
+  # 机器人本地端点，相对机器人命名空间解析。
+  relocalize: "relocalize"
+
+# 每个权威数据只有一个生产方。其他节点只能读取或请求，不得发布同名数据。
+authority:
+  competition_state: "/edge/system_manager"
+  emergency_stop: "/edge/system_manager"
+  target_registry: "/edge/target_fusion"
+  mission_intake: "/edge/mission_interpreter"
+  # 只有验证器可以发布valid=true的计划。
+  mission_plan: "/edge/mission_validator"
+  mission_state: "/edge/task_allocator"
+  rescue_tasks: "/edge/task_allocator"
+  # 救援区占用、停留计时和完成判定；机器人动作只负责到达并保持。
+  rescue_zone_occupancy_and_dwell: "/edge/rescue_verifier"
+  event_log_file: "/edge/event_logger"
+
+# 比赛阶段跳转表。requesters列出允许发起该跳转的SetCompetitionPhase.requester_type。
+# 任意阶段都可进入ESTOP（operator或system）。急停释放不经此表，见estop_release。
+phase_transitions:
+  - {from: PREPARATION, to: TASK1, requesters: [operator]}
+  - {from: TASK1, to: HANDOVER, requesters: [operator, system]}
+  - {from: HANDOVER, to: TASK2A, requesters: [operator]}
+  - {from: TASK2A, to: FROZEN, requesters: [operator, system]}
+  - {from: FROZEN, to: TASK2B, requesters: [operator], condition: "frozen_from_task2a_and_relocalized"}
+  - {from: FROZEN, to: RESUME_INTERRUPTED, requesters: [operator], condition: "interrupted_phase_set"}
+  - {from: FROZEN, to: FINISHED, requesters: [operator]}
+  - {from: TASK2B, to: FINISHED, requesters: [operator, system]}
+
+estop_release:
+  # 释放急停不会直接恢复运动：中断的是PREPARATION或FINISHED则回到该阶段，
+  # 否则进入FROZEN并保留interrupted_phase；继续比赛需操作员按裁判决定再次请求。
+  return_to_same_phase: [PREPARATION, FINISHED, FROZEN]
+  otherwise: FROZEN
+
+safety:
+  estop_release_requires_new_generation: true
+  estop_release_never_resumes_motion: true
+  stale_robot_removed_from_allocation: true
+  phase_change_cancels_active_actions: true
+  freeze_requires_all_online_robot_acks: true

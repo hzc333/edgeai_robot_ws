@@ -1,0 +1,35 @@
+# Goal sent by the edge coordinator to one robot executor. For a cooperative
+# target, each participant receives one slot with the same task_id.
+# 语义是“导航到救援位姿并保持静止”，机器人不计时、不判定完成。救援区占用、
+# 停留计时和完成只由/edge/rescue_verifier判定；完成后协调器取消该动作以释放机器人。
+string run_id
+string task_id
+string target_id
+string map_id
+uint32 map_revision
+uint8 TYPE_NORMAL=1
+uint8 TYPE_COOPERATIVE=2
+uint8 target_type
+uint8 rescue_zone_index
+geometry_msgs/PoseStamped rescue_pose
+# 导航到达容差，必须小于RescueTask.zone_tolerance_m，保证到达后确实位于救援区内。
+float32 arrival_xy_tolerance_m
+# 到达后最长保持时间；零表示一直保持直到被取消。
+builtin_interfaces/Duration hold_timeout
+---
+uint8 TERMINAL_FAILED=2
+uint8 TERMINAL_CANCELLED=3
+uint8 TERMINAL_BLOCKED=4
+uint8 TERMINAL_HOLD_TIMEOUT=5
+uint8 terminal_state
+TaskReason reason
+geometry_msgs/PoseStamped final_pose
+builtin_interfaces/Time ended_at
+---
+uint8 STATE_ACCEPTED=1
+uint8 STATE_NAVIGATING=2
+uint8 STATE_RECOVERING=3
+uint8 STATE_HOLDING=4
+uint8 execution_state
+float32 distance_to_rescue_pose_m
+string message

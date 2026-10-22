@@ -1,0 +1,34 @@
+# P2/P4到机器人代理的通用导航动作。机器人代理内部再调用Nav2。
+uint8 PURPOSE_EXPLORATION=1
+uint8 PURPOSE_RELOCALIZATION=2
+uint8 PURPOSE_TRANSIT=3
+
+string run_id
+string request_id
+string map_id
+uint32 map_revision
+uint8 purpose
+geometry_msgs/PoseStamped goal_pose
+float32 xy_tolerance_m
+float32 yaw_tolerance_rad
+builtin_interfaces/Duration timeout
+---
+uint8 TERMINAL_SUCCEEDED=1
+uint8 TERMINAL_FAILED=2
+uint8 TERMINAL_CANCELLED=3
+uint8 TERMINAL_BLOCKED=4
+
+bool success
+uint8 terminal_state
+TaskReason reason
+geometry_msgs/PoseStamped final_pose
+builtin_interfaces/Time completed_at
+---
+uint8 STATE_ACCEPTED=1
+uint8 STATE_NAVIGATING=2
+uint8 STATE_RECOVERING=3
+
+uint8 execution_state
+float32 distance_remaining_m
+builtin_interfaces/Duration elapsed
+string message

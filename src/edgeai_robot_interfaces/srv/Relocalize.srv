@@ -1,0 +1,21 @@
+# 机器人在已保存地图上的（重新）定位，由机器人定位封装节点（P1）提供于
+# /<robot_id>/relocalize。调用方为/edge/system_manager（交接、重置、Task 2B重摆后）。
+# 各模式是否允许在比赛中使用由competition_parameters.yaml中official.localization决定。
+uint8 MODE_GLOBAL=1
+uint8 MODE_KNOWN_START_POSE=2
+uint8 MODE_POSE_HINT=3
+
+string run_id
+string map_id
+uint32 map_revision
+uint8 mode
+# MODE_KNOWN_START_POSE：official.localization.start_poses中的键。
+string start_pose_id
+# MODE_POSE_HINT：map坐标系中的先验位姿及协方差。
+geometry_msgs/PoseWithCovarianceStamped pose_hint
+builtin_interfaces/Duration timeout
+---
+bool success
+geometry_msgs/PoseWithCovarianceStamped estimated_pose
+TaskReason reason
+string message

@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edgeai.local/schemas/run-manifest-v1.schema.json",
+  "title": "Edge AI机器人挑战赛运行Manifest",
+  "description": "runs/<run_id>/manifest.json，由/edge/system_manager（P2）维护。每次阶段冻结后整体重写为新版本（manifest_revision递增），已登记文件的哈希不得改变。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "manifest_revision",
+    "updated_at",
+    "run_mode",
+    "rulebook_version",
+    "git",
+    "robots",
+    "task1",
+    "resets",
+    "files"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "$ref": "#/$defs/nonEmptyString" },
+    "manifest_revision": { "type": "integer", "minimum": 1 },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "run_mode": { "enum": ["development", "rehearsal", "competition"] },
+    "rulebook_version": { "$ref": "#/$defs/nonEmptyString" },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "dirty"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "dirty": { "type": "boolean" }
+      }
+    },
+    "robots": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^robot_[1-4]$" }
+    },
+    "task1": {
+      "description": "Task 1冻结信息；冻结前为null。",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["frozen_at", "map_id", "map_revision", "target_revision", "end_reason"],
+          "properties": {
+            "frozen_at": { "type": "string", "format": "date-time" },
+            "map_id": { "$ref": "#/$defs/nonEmptyString" },
+            "map_revision": { "type": "integer", "minimum": 1 },
+            "target_revision": { "type": "integer", "minimum": 0 },
+            "end_reason": {
+              "enum": ["time_limit", "team_declared_complete", "team_requested_termination", "referee_stop"]
+            }
+          }
+        }
+      ]
+    },
+    "resets": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/file" }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "role", "stage", "sha256", "size_bytes"],
+      "properties": {
+        "path": {
+          "description": "相对runs/<run_id>/的路径。",
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+        },
+        "role": {
+          "enum": [
+            "map_yaml",
+            "map_image",
+            "target_list",
+            "events",
+            "original_instruction",
+            "mission_intake",
+            "mission_plan",
+            "parameters",
+            "component_versions",
+            "rosbag",
+            "other"
+          ]
+        },
+        "stage": { "enum": ["system", "task1", "task2a", "task2b"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

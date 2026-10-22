@@ -1,0 +1,10 @@
+# Submits the organizer-provided natural-language instruction to the local
+# mission interpreter (/edge/submit_mission). accepted只表示指令已接收并分配
+# mission_id；解析和验证结果异步发布于/edge/mission_intake，通过验证的计划
+# 由验证器发布于/edge/mission_plan。
+string run_id
+string original_instruction
+---
+bool accepted
+string mission_id
+string message

@@ -1,0 +1,151 @@
+# 由比赛决定的参数在官方规则或技术教程正式确定前保持为null。
+# development中的值只是保守测试默认值，不能表述为组织方规则。
+# 参数解析规则（运行模式见run_modes）：
+#   competition：只使用official；required_for_motion中任一项为null时，
+#                /edge/system_manager拒绝离开PREPARATION，并报告CODE_OFFICIAL_PARAMETER_MISSING。
+#   rehearsal：official非null时使用official，否则使用development中同路径的值，
+#              每个回退项写入system/parameters.yaml的fallbacks列表并在manifest中标注run_mode。
+#   development：同rehearsal，但允许required_for_motion未满足。
+# 各节点不得自行实现回退：统一由启动时生成的已解析参数文件提供，节点只读取。
+
+schema_version: 1
+runtime_contract: "config/interface_runtime.yaml"
+rulebook:
+  version: "V0-draft"
+  effective_date: null
+  source: "Edge_AI_Robotics_Challenge_Rulebook_V0.md"
+
+run_modes:
+  allowed: ["development", "rehearsal", "competition"]
+  default: "development"
+  # 启动参数run_mode显式指定；比赛机器上的启动入口必须显式传入competition。
+  required_for_motion:
+    - "aruco.dictionary"
+    - "aruco.marker_size_m"
+    - "aruco.id_mapping"
+    - "rescue.geometry_version"
+    - "rescue.position_tolerance_m"
+    - "rescue.normal_dwell_s"
+    - "rescue.cooperative_dwell_s"
+    - "motion.max_linear_speed_mps"
+    - "motion.max_angular_speed_radps"
+    - "timing.task1_s"
+    - "timing.task2a_s"
+    - "timing.task2b_s"
+
+official:
+  arena:
+    width_m: null
+    height_m: null
+    # 是否以及在哪个坐标系中公布起始区。若以场地坐标给出，P2应以Task 1起点初始化
+    # SLAM（map_start_pose），使map与场地坐标一致，Task 2起点才可直接使用。
+    start_zone_frame: null
+
+  localization:
+    # 起点ID到场地坐标位姿{x, y, yaw}的映射；未公布时为空。
+    start_poses: {}
+    task2b_start_poses: {}
+    # 重置或重摆后能否由操作员输入位姿提示（Relocalize.MODE_POSE_HINT）。
+    operator_pose_hint_allowed: null
+
+  robots:
+    task1_max_count: 2
+    task2_max_count: 4
+    available_physical_count: null
+
+  aruco:
+    dictionary: null
+    marker_size_m: null
+    # 空映射视为未公布。
+    id_mapping: {}
+    # vertical / horizontal；坐标约定假设vertical，见docs/marker_and_rescue_geometry.md。
+    mounting: null
+    mounting_height_m: null
+
+  rescue:
+    geometry_version: null
+    normal_zone_rule: null
+    cooperative_zone_rule: null
+    position_tolerance_m: null
+    normal_dwell_s: null
+    cooperative_dwell_s: null
+
+  timing:
+    preparation_s: null
+    task1_s: null
+    handover_s: null
+    task2a_s: null
+    verification_s: null
+    task2b_s: null
+
+  motion:
+    max_linear_speed_mps: null
+    max_angular_speed_radps: null
+
+  reset:
+    allowed_count: null
+    penalty: null
+    timing_continues: null
+    retain_map: null
+    retain_targets: null
+    retain_completed_rescues: null
+
+  task2b:
+    reposition_after_task2a: null
+    allowed_instruction_languages: null
+    cloud_llm_allowed: null
+    model_resource_limits: null
+
+development:
+  arena:
+    width_m: 5.0
+    height_m: 5.0
+
+  motion:
+    max_linear_speed_mps: 0.15
+    max_angular_speed_radps: 0.30
+    command_timeout_s: 0.50
+
+  health:
+    robot_state_stale_s: 1.0
+    tf_lookup_timeout_s: 0.20
+    edge_connection_timeout_s: 1.0
+
+  perception:
+    minimum_detection_confidence: 0.60
+    fusion_position_gate_m: 0.50
+    tf_retry_window_s: 0.50
+
+  exploration:
+    map_resolution_m: 0.05
+    frontier_blacklist_radius_m: 0.30
+    no_progress_timeout_s: 20.0
+
+  rescue:
+    # 仅用于测试；正式救援几何和时间公布后必须使用official中的值。
+    # 几何规则本身见development_scenarios.yaml中的rescue_geometry。
+    geometry_version: "development-v1"
+    position_tolerance_m: 0.15
+    normal_dwell_s: 3.0
+    cooperative_dwell_s: 3.0
+    # ExecuteRescueTask.arrival_xy_tolerance_m；必须小于position_tolerance_m。
+    arrival_xy_tolerance_m: 0.08
+
+  timing:
+    task1_s: 600.0
+    task2a_s: 600.0
+    task2b_s: 600.0
+
+  aruco:
+    dictionary: "DICT_4X4_50"
+    marker_size_m: 0.15
+    id_mapping:
+      1: {target_id: "T1", type: "normal"}
+      2: {target_id: "T2", type: "normal"}
+      3: {target_id: "T3", type: "normal"}
+      10: {target_id: "TC1", type: "cooperative"}
+
+  localization:
+    start_poses:
+      task1_start: {x: -1.5, y: -1.5, yaw: 0.0}
+    operator_pose_hint_allowed: true

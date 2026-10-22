@@ -1,0 +1,14 @@
+# LLM任务解释结果。候选计划（valid=false）只经/edge/validate_mission传给验证器；
+# 只有验证器能以valid=true发布到/edge/mission_plan。验证失败原因见MissionIntakeResult。
+std_msgs/Header header
+string run_id
+string mission_id
+string map_id
+uint32 map_revision
+uint32 target_revision
+string original_instruction
+string model_name
+string model_version
+string prompt_version
+MissionStep[] steps
+bool valid

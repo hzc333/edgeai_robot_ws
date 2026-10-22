@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edgeai.local/schemas/mission-plan-v2.schema.json",
+  "title": "Edge AI机器人挑战赛LLM任务计划",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "mission_id",
+    "map_id",
+    "map_revision",
+    "target_revision",
+    "created_at",
+    "validated_at",
+    "original_instruction",
+    "model",
+    "steps"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "run_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "mission_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "map_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "map_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "target_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "original_instruction": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "prompt_version"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "prompt_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "validated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id",
+        "action",
+        "target_id",
+        "priority",
+        "predecessor_step_ids"
+      ],
+      "properties": {
+        "step_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "action": {
+          "const": "rescue"
+        },
+        "target_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "priority": {
+          "description": "数值越大优先级越高；0表示指令未表达优先级。不能替代先后约束。",
+          "type": "integer",
+          "minimum": 0
+        },
+        "predecessor_step_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    }
+  },
+  "description": "只有通过P4验证器的计划才以该格式写入task2b/mission_plan.json；解析失败或被拒绝的指令只记录在task2b/mission_intake.json。"
+}

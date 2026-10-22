@@ -1,0 +1,12 @@
+# Atomically freezes the Task 1 outputs and persists a manifest, map metadata,
+# map image, and target list. URIs are returned for logging and handover.
+string run_id
+string map_id
+uint32 expected_map_revision
+uint32 expected_target_revision
+---
+bool success
+string manifest_uri
+string map_yaml_uri
+string target_list_uri
+string message

@@ -1,0 +1,35 @@
+name: Contract checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install validation dependencies
+        run: python -m pip install jsonschema PyYAML
+      - name: Validate shared contracts
+        run: python tools/validate_project_contracts.py
+
+  pixi-environment:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: v0.83.0
+          locked: true
+          cache: true
+      - name: Build workspace in the locked environment
+        run: pixi run build
+      - name: Check environment consistency
+        run: pixi run bash -c "source install/setup.bash && python tools/check_environment.py"
+      - name: Validate shared contracts in the locked environment
+        run: pixi run validate

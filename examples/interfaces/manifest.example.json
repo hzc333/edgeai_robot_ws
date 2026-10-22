@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "run_id": "run-20261022T120000Z-1a2b3c4d",
+  "manifest_revision": 2,
+  "updated_at": "2026-10-22T12:00:05Z",
+  "run_mode": "development",
+  "rulebook_version": "V0-draft",
+  "git": {
+    "commit": "27f2f16000000000000000000000000000000000",
+    "dirty": false
+  },
+  "robots": [
+    "robot_1",
+    "robot_2"
+  ],
+  "task1": {
+    "frozen_at": "2026-10-22T12:00:00Z",
+    "map_id": "map-5e6f7a8b",
+    "map_revision": 1,
+    "target_revision": 7,
+    "end_reason": "team_declared_complete"
+  },
+  "resets": 0,
+  "files": [
+    {
+      "path": "system/parameters.yaml",
+      "role": "parameters",
+      "stage": "system",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 4096
+    },
+    {
+      "path": "system/component_versions.json",
+      "role": "component_versions",
+      "stage": "system",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 2048
+    },
+    {
+      "path": "task1/map.yaml",
+      "role": "map_yaml",
+      "stage": "task1",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 120
+    },
+    {
+      "path": "task1/map.pgm",
+      "role": "map_image",
+      "stage": "task1",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 10831
+    },
+    {
+      "path": "task1/targets.json",
+      "role": "target_list",
+      "stage": "task1",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 3072
+    }
+  ]
+}

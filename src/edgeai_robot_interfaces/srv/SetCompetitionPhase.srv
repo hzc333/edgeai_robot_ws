@@ -1,0 +1,26 @@
+# Phase transition request. Implementations must reject illegal transitions
+# and must make FREEZE and ESTOP safe and idempotent. 合法跳转及各请求方允许
+# 发起的跳转以config/interface_runtime.yaml中的phase_transitions为准。
+uint8 PHASE_PREPARATION=0
+uint8 PHASE_TASK1=1
+uint8 PHASE_HANDOVER=2
+uint8 PHASE_TASK2A=3
+uint8 PHASE_FROZEN=4
+uint8 PHASE_TASK2B=5
+uint8 PHASE_FINISHED=6
+uint8 PHASE_ESTOP=7
+
+# OPERATOR：裁判/操作员界面；SYSTEM：自主模块（如探索完成、Task 2A全部完成）。
+uint8 REQUESTER_OPERATOR=1
+uint8 REQUESTER_SYSTEM=2
+
+string run_id
+uint8 requested_phase
+uint8 requester_type
+string requester_node
+string reason
+---
+bool accepted
+uint8 current_phase
+uint64 phase_sequence
+string message
