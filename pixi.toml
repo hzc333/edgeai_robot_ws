@@ -8,6 +8,9 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
+build = "colcon build --symlink-install"
+validate = "python tools/validate_project_contracts.py"
+check-env = "python tools/check_environment.py"
 
 [dependencies]
 # ROS 2 Jazzy
@@ -32,7 +35,27 @@ ros-jazzy-ros2lifecycle = ">=0.32.7,<0.33"
 ros-jazzy-nav2-amcl = ">=1.3.10,<2"
 ros-jazzy-nav2-lifecycle-manager = ">=1.3.10,<2"
 
+# Nav2完整导航栈：规划器、控制器、行为树、恢复行为、代价地图及bringup启动文件。
+ros-jazzy-navigation2 = ">=1.3.10,<2"
+ros-jazzy-nav2-bringup = ">=1.3.10,<2"
+
+# 运行记录：rosbag2及Jazzy默认的MCAP存储插件。
+ros-jazzy-rosbag2 = ">=0.26.9,<0.27"
+ros-jazzy-rosbag2-storage-mcap = ">=0.26.9,<0.27"
+
+# 感知：OpenCV固定到4.12。ArUco接口在4.7（ArucoDetector）和5.x中均有破坏性变化，
+# 升级必须由P3评估并同步修改docs/marker_and_rescue_geometry.md和tools/check_environment.py。
+ros-jazzy-cv-bridge = ">=4.1.0,<5"
+libopencv = "4.12.*"
+py-opencv = "4.12.*"
+
+# 契约校验与配置解析。
+jsonschema = ">=4.18,<5"
+pyyaml = ">=6,<7"
+
 [activation.env]
+# RoboStack不设置ROS_DISTRO；显式设置以便rosdep、启动文件和环境检查与系统ROS一致。
+ROS_DISTRO = "jazzy"
 RMW_IMPLEMENTATION = "rmw_cyclonedds_cpp"
 ROS_AUTOMATIC_DISCOVERY_RANGE = "SUBNET"
 ROS_DOMAIN_ID = "0"

@@ -5,15 +5,26 @@ set -e
 WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$WS_DIR"
 
-# Activate Pixi environment
-PIXI_HOOK="$(pixi shell-hook)"
-eval "$PIXI_HOOK"
-unset PIXI_HOOK
+# Prefer the locked Pixi environment, but support a complete system ROS 2 Jazzy
+# installation for development machines that do not have Pixi installed.
+if command -v pixi >/dev/null 2>&1; then
+    PIXI_HOOK="$(pixi shell-hook)"
+    eval "$PIXI_HOOK"
+    unset PIXI_HOOK
+    BUILD_COMMAND="pixi run colcon build --symlink-install"
+elif [[ -f /opt/ros/jazzy/setup.bash ]]; then
+    source /opt/ros/jazzy/setup.bash
+    export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
+    BUILD_COMMAND="source /opt/ros/jazzy/setup.bash && colcon build --symlink-install"
+else
+    echo "Neither Pixi nor /opt/ros/jazzy/setup.bash is available."
+    exit 1
+fi
 
 # Source ROS 2 workspace
 if [[ ! -f install/setup.bash ]]; then
     echo "Workspace has not been built."
-    echo "Run: pixi run colcon build --symlink-install"
+    echo "Run: $BUILD_COMMAND"
     exit 1
 fi
 
