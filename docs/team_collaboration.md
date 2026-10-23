@@ -8,12 +8,14 @@
 ## 1. 仓库所有者一次性设置（hzc333）
 
 1. **添加成员**：仓库 Settings → Collaborators → Add people，逐个输入队友的GitHub用户名。队友在邮件或GitHub通知中接受邀请后才有推送权限。
-2. **保护`main`**：Settings → Branches → Add branch ruleset（或Add rule），目标分支`main`：
+2. **保护`main`（可选，当前未启用）**：Settings → Branches → Add branch ruleset（或Add rule），目标分支`main`：
    - 勾选 Require a pull request before merging，Required approvals设为1；
    - 勾选 Require status checks to pass，添加`validate-contracts`和`pixi-environment`；
    - 勾选 Block force pushes；
    - 不要勾选允许绕过（包括管理员），否则规则对所有者无效。
 3. **合并方式**：Settings → General → Pull Requests，只保留 Allow squash merging，并勾选 Automatically delete head branches。这样`main`上一项工作对应一个提交，历史清晰。
+
+当前状态：仓库所有者决定暂不启用第2项保护。这意味着GitHub**不会阻止**任何协作者直接推送或强制推送`main`，第3节的流程完全依靠大家自觉遵守：不直接推送`main`、不对`main`强制推送、合并前确认CI通过。没有启用第3项设置时，合并PR前请在 Merge 按钮旁的下拉菜单中手动选择 **Squash and merge**。
 
 ## 2. 每位成员首次设置
 
@@ -40,7 +42,7 @@ pixi run bash -c "source install/setup.bash && python tools/check_environment.py
 
 ### 2.3 情况B：已经克隆过组织方仓库，并且有自己的改动
 
-团队`main`就是组织方的两个提交（最后一个是`27f2f16`）加上团队准备工作，所以你的改动可以直接搬过去。
+团队`main`的历史完整包含组织方的提交，团队的准备工作是在组织方提交之后追加的。所以只要找到“你的改动是从组织方哪个提交开始的”，就可以把这之后你自己的提交原样搬到团队`main`上，不会重复也不会丢失。下面的命令让Git自动计算这个起点，不需要你记提交号。
 
 先把远程改过来：
 
@@ -49,7 +51,16 @@ cd edgeai_robot_ws
 git remote rename origin upstream
 git remote add origin https://github.com/hzc333/edgeai_robot_ws.git
 git fetch origin
+git fetch upstream
 ```
+
+先确认团队`main`已经包含组织方的最新提交（正常情况下会输出“已包含”）：
+
+```bash
+git merge-base --is-ancestor upstream/main origin/main && echo 已包含 || echo 未包含
+```
+
+如果输出“未包含”，说明组织方有了团队尚未同步的更新。先不要迁移，在群里通知负责同步的人按第5节同步，同步合并后再继续。
 
 **改动还没有提交**：
 
@@ -62,12 +73,16 @@ git stash pop
 **改动已经提交在本地`main`上**：
 
 ```bash
+BASE=$(git merge-base HEAD upstream/main)  # 你的改动从组织方哪个提交开始
+git log --oneline $BASE..HEAD              # 先确认：这里列出的应全部是你自己的提交
 git switch -c feature/pN-简短描述          # 从当前带改动的main分出
-git rebase --onto origin/main 27f2f16      # 只把27f2f16之后你自己的提交搬到团队main上
+git rebase --onto origin/main $BASE        # 只把BASE之后你自己的提交搬到团队main上
 git switch -C main origin/main             # 本地main对齐团队main
 ```
 
-有冲突时，按提示逐个修改文件，`git add`后执行`git rebase --continue`。最后检查`git log --oneline origin/main..`，应只剩你自己的提交。
+第二条命令列出的提交里如果出现了不是你写的提交，先停下来在群里问，不要继续。
+
+有冲突时，按提示逐个修改文件，`git add`后执行`git rebase --continue`。不确定怎么解决时，执行`git rebase --abort`可以完全恢复到迁移之前的状态。最后检查`git log --oneline origin/main..`，应只剩你自己的提交。
 
 切换环境后（例如以前用系统ROS构建过），先删除`build/`、`install/`和`log/`再重新构建。
 
@@ -94,8 +109,12 @@ git push -u origin feature/p1-multi-robot-namespace
 ```bash
 git switch main
 git pull --ff-only
-git branch -d feature/p1-multi-robot-namespace
+git branch -D feature/p1-multi-robot-namespace
 ```
+
+这里必须用大写`-D`。Squash合并会把分支上的提交压成`main`上的一个新提交，原分支的提交并没有原样进入`main`，所以Git会认为分支“未合并”，小写`-d`会报错拒绝删除。这不代表合并失败：PR页面显示Merged即可。
+
+**合并后不要在旧分支上继续提交**。下一项工作一律从最新的`main`新开分支，否则已合并的改动会以冲突的形式重新出现。
 
 ### 让自己的分支跟上main
 
