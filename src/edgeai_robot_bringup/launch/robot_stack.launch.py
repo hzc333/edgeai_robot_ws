@@ -15,16 +15,26 @@
 """
 Start the software stack of one robot in its namespace.
 
-Currently the stack is the safety_watchdog (ADR-0003); Nav2 and robot_agent
-will be added here. Competition parameters are resolved per run_mode with
-edgeai_common and handed to the nodes as ROS parameters; a competition launch
-fails while required official values are still unset.
+The stack is the safety_watchdog (ADR-0003) and, with nav_mode:=amcl|slam,
+Nav2 from edgeai_robot_navigation; robot_agent will be added here.
+Competition parameters are resolved per run_mode with edgeai_common and
+handed to the nodes as ROS parameters; a competition launch fails while
+required official values are still unset.
 """
 
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from edgeai_common.config import find_config_dir, load_runtime_contract, resolve_parameters
 from edgeai_common.frames import validate_robot_id
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    GroupAction,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, PushRosNamespace
 
@@ -60,7 +70,24 @@ def _launch_setup(context, *args, **kwargs):
             'use_sim_time': use_sim_time,
         }],
     )
-    return [GroupAction([PushRosNamespace(robot_id), watchdog])]
+    actions = [GroupAction([PushRosNamespace(robot_id), watchdog])]
+    nav_mode = LaunchConfiguration('nav_mode').perform(context)
+    if nav_mode not in ('none', 'amcl', 'slam'):
+        raise RuntimeError(f'nav_mode must be none, amcl or slam, got {nav_mode!r}')
+    if nav_mode != 'none':
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory('edgeai_robot_navigation'), 'launch',
+                'nav_robot.launch.py')),
+            launch_arguments={
+                'robot_id': robot_id,
+                'mode': nav_mode,
+                'run_mode': run_mode,
+                'config_dir': config_dir,
+                'use_sim_time': str(use_sim_time).lower(),
+            }.items(),
+        ))
+    return actions
 
 
 def generate_launch_description():
@@ -74,5 +101,7 @@ def generate_launch_description():
         DeclareLaunchArgument('require_competition_state', default_value='true',
                               description='false only in development: move without a '
                                           'competition phase manager'),
+        DeclareLaunchArgument('nav_mode', default_value='none',
+                              description='none | amcl | slam (Nav2 in edgeai_robot_navigation)'),
         OpaqueFunction(function=_launch_setup),
     ])

@@ -5,15 +5,15 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 | 项目 | 内容 |
 |---|---|
 | 负责人 | P1（hzc333） |
-| 已完成 | 多机器人仿真启动；`safety_watchdog`（ADR-0003）及其测试；`robot_stack.launch.py`（2026-10-24验证） |
-| 未实现 | `robot_agent`（RobotState、阶段确认、两个动作服务器）、Nav2接入（在`edgeai_robot_navigation`中）、实机启动 |
+| 已完成 | 多机器人仿真启动；`safety_watchdog`（ADR-0003）及其测试；`robot_stack.launch.py`（看门狗 + 可选Nav2），2026-10-24验证 |
+| 未实现 | `robot_agent`（RobotState、阶段确认、两个动作服务器）、实机启动 |
 
 ## 1. 文件清单
 
 | 文件 | 作用 |
 |---|---|
 | `edgeai_robot_bringup/safety_watchdog.py` | 看门狗节点，入口`ros2 run edgeai_robot_bringup safety_watchdog`；门控逻辑是纯函数`decide()`，便于测试 |
-| `launch/robot_stack.launch.py` | 在`/robot_N`命名空间启动一台机器人的软件栈（目前只有看门狗），按运行模式解析参数 |
+| `launch/robot_stack.launch.py` | 在`/robot_N`命名空间启动一台机器人的软件栈：看门狗，以及`nav_mode`不为`none`时的Nav2；按运行模式解析参数 |
 | `launch/sim_multi_robot.launch.py` | 启动Gazebo世界、1～4台仿真机器人以及各自的软件栈，可选RViz |
 | `test/test_safety_watchdog.py` | 看门狗测试：纯逻辑测试和ROS通信测试（见第5节） |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
@@ -81,6 +81,7 @@ ros2 launch edgeai_robot_bringup robot_stack.launch.py robot_id:=robot_1 run_mod
 | `config_dir` | 搜索 | 仓库根目录`config/` |
 | `use_sim_time` | `true` | 实机设为`false` |
 | `require_competition_state` | `true` | 见2.3节 |
+| `nav_mode` | `none` | `none`：只启动看门狗；`amcl`或`slam`：同时包含`edgeai_robot_navigation`的`nav_robot.launch.py`（AMCL模式下导航需在定位后激活，见该包README第2.2节） |
 
 ## 4. sim_multi_robot.launch.py
 
@@ -102,6 +103,7 @@ ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot
 | `stack` | `true` | 为每台机器人包含`robot_stack.launch.py` |
 | `run_mode` | `development` | 传给每台机器人的软件栈 |
 | `require_competition_state` | `true` | 同上 |
+| `nav_mode` | `none` | 同上，作用于每台机器人 |
 
 工作过程：读取`config/sim/robots.yaml`的出生位姿 → 包含一次`sim_world.launch.py` → 每台机器人包含`sim_robot.launch.py`和（`stack:=true`时）`robot_stack.launch.py`。`robots.yaml`中没有某台机器人的位姿时启动报错退出。每台机器人的话题和坐标系见`edgeai_robot_description`的README。
 

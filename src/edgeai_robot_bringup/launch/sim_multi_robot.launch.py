@@ -75,6 +75,7 @@ def _launch_setup(context, *args, **kwargs):
                     'use_sim_time': 'true',
                     'require_competition_state':
                         LaunchConfiguration('require_competition_state').perform(context),
+                    'nav_mode': LaunchConfiguration('nav_mode').perform(context),
                 }.items(),
             ))
 
@@ -104,6 +105,8 @@ def generate_launch_description():
         DeclareLaunchArgument('stack', default_value='true',
                               description='Start each robot stack (robot_stack.launch.py)'),
         DeclareLaunchArgument('run_mode', default_value='development'),
+        DeclareLaunchArgument('nav_mode', default_value='none',
+                              description='none | amcl | slam for every robot stack'),
         DeclareLaunchArgument('require_competition_state', default_value='true',
                               description='false only in development (manual driving '
                                           'without a phase manager)'),
