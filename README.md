@@ -110,7 +110,8 @@ source install/setup.bash
 
 | 话题 | ROS消息类型 | 用途 |
 | --- | --- | --- |
-| `/robot_1/cmd_vel` | `geometry_msgs/msg/Twist` | 机器人速度指令 |
+| `/robot_1/cmd_vel` | `geometry_msgs/msg/Twist` | 底盘速度指令，只由`safety_watchdog`发布 |
+| `/robot_1/cmd_vel_manual` | `geometry_msgs/msg/Twist` | 开发模式下的手动速度指令 |
 | `/robot_1/odom` | `nav_msgs/msg/Odometry` | Gazebo差速驱动里程计 |
 | `/robot_1/joint_states` | `sensor_msgs/msg/JointState` | 仿真关节状态 |
 | `/robot_1/scan` | `sensor_msgs/msg/LaserScan` | LiDAR扫描数据（Best Effort） |
@@ -133,21 +134,16 @@ ros2 topic echo /robot_1/odom --once
 
 ### 移动与停止
 
+每台机器人的`/robot_N/cmd_vel`只由`safety_watchdog`发布（[ADR-0003](docs/decisions/0003-velocity-safety-chain.md)），**不要直接向它发布**。`./start_sim.sh`以开发模式启动，并关闭“必须有比赛阶段管理器”的要求，所以可以向`/robot_N/cmd_vel_manual`发送手动指令。看门狗会把速度限制在开发上限（0.15 m/s、0.30 rad/s），输入停止0.5 s后自动输出零速度。
+
 确认机器人前方没有障碍后，发送低速前进指令：
 
 ```bash
-ros2 topic pub --rate 10 /robot_1/cmd_vel geometry_msgs/msg/Twist \
+ros2 topic pub --rate 10 /robot_1/cmd_vel_manual geometry_msgs/msg/Twist \
   '{linear: {x: 0.1}, angular: {z: 0.0}}'
 ```
 
-按**Ctrl+C**停止发布器，然后必须显式发送零速度指令：
-
-```bash
-ros2 topic pub --once /robot_1/cmd_vel geometry_msgs/msg/Twist \
-  '{linear: {x: 0.0}, angular: {z: 0.0}}'
-```
-
-不能把“停止速度发布器”等同于“机器人已经收到停止命令”。速度安全链（[ADR-0003](docs/decisions/0003-velocity-safety-chain.md)）上线后，`/robot_N/cmd_vel`只由`safety_watchdog`发布，手动控制改为在开发模式下发布到`/robot_N/cmd_vel_manual`。
+按**Ctrl+C**停止发布器，机器人会在0.5 s内停车。手动控制只在`run_mode:=development`下有效；演练和比赛模式中看门狗忽略手动指令（规则7.1禁止遥控）。
 
 ## 使用SLAM Toolbox建图
 

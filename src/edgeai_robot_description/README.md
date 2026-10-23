@@ -95,7 +95,7 @@ URDF中的link名不带前缀；`robot_state_publisher`的`frame_prefix`（`sim_
 
 | ROS话题 | 类型 | 方向 | QoS（ROS侧） |
 |---|---|---|---|
-| `/robot_N/cmd_vel` | `geometry_msgs/msg/Twist` | ROS → Gazebo | Reliable |
+| `/robot_N/cmd_vel` | `geometry_msgs/msg/Twist` | ROS → Gazebo | Reliable；只由`edgeai_robot_bringup`的`safety_watchdog`发布 |
 | `/robot_N/odom` | `nav_msgs/msg/Odometry` | Gazebo → ROS | Reliable |
 | `/robot_N/joint_states` | `sensor_msgs/msg/JointState` | Gazebo → ROS | Reliable |
 | `/robot_N/scan` | `sensor_msgs/msg/LaserScan` | Gazebo → ROS | 订阅时用Best Effort兼容 |
@@ -130,12 +130,12 @@ URDF中的link名不带前缀；`robot_state_publisher`的`frame_prefix`（`sim_
 xacro urdf/edgeai_robot_real.urdf.xacro robot_id:=robot_2 > /tmp/r2.urdf && check_urdf /tmp/r2.urdf
 
 # 两台机器人无界面运行，检查话题、帧和独立运动
-ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot_2 headless:=true
+ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot_2 headless:=true \
+  require_competition_state:=false
 ros2 topic list | grep -vE '^/(robot_[1-4]/|clock$|tf$|tf_static$|parameter_events$|rosout$)'   # 应为空
 ros2 topic echo /robot_2/scan --once --field header.frame_id --qos-reliability best_effort         # robot_2/lidar_link
 ros2 topic echo /robot_2/camera/image --once --field header.frame_id --qos-reliability best_effort # robot_2/camera_optical_frame
-timeout 2 ros2 topic pub -r 10 /robot_2/cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.1}}'
-ros2 topic pub --once /robot_2/cmd_vel geometry_msgs/msg/Twist '{}'
+timeout 2 ros2 topic pub -r 10 /robot_2/cmd_vel_manual geometry_msgs/msg/Twist '{linear: {x: 0.1}}'
 gz model -m robot_1 -p    # robot_1不应移动
 ```
 

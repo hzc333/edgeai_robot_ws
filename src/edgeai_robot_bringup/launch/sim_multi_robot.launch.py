@@ -29,6 +29,10 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _as_bool(text):
+    return text.strip().lower() in ('true', '1', 'yes')
+
+
 def _launch_setup(context, *args, **kwargs):
     robots = [r.strip() for r in LaunchConfiguration('robots').perform(context).split(',')
               if r.strip()]
@@ -59,8 +63,22 @@ def _launch_setup(context, *args, **kwargs):
                 'yaw': str(pose['yaw']),
             }.items(),
         ))
+        if _as_bool(LaunchConfiguration('stack').perform(context)):
+            actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(os.path.join(
+                    get_package_share_directory('edgeai_robot_bringup'), 'launch',
+                    'robot_stack.launch.py')),
+                launch_arguments={
+                    'robot_id': robot_id,
+                    'run_mode': LaunchConfiguration('run_mode').perform(context),
+                    'config_dir': str(config_dir),
+                    'use_sim_time': 'true',
+                    'require_competition_state':
+                        LaunchConfiguration('require_competition_state').perform(context),
+                }.items(),
+            ))
 
-    if LaunchConfiguration('rviz').perform(context).lower() in ('true', '1'):
+    if _as_bool(LaunchConfiguration('rviz').perform(context)):
         rviz_file = 'realistic_robot.rviz' if len(robots) == 1 else 'multi_robot.rviz'
         actions.append(Node(
             package='rviz2',
@@ -83,5 +101,11 @@ def generate_launch_description():
         DeclareLaunchArgument('world', default_value=default_world),
         DeclareLaunchArgument('headless', default_value='false'),
         DeclareLaunchArgument('rviz', default_value='false'),
+        DeclareLaunchArgument('stack', default_value='true',
+                              description='Start each robot stack (robot_stack.launch.py)'),
+        DeclareLaunchArgument('run_mode', default_value='development'),
+        DeclareLaunchArgument('require_competition_state', default_value='true',
+                              description='false only in development (manual driving '
+                                          'without a phase manager)'),
         OpaqueFunction(function=_launch_setup),
     ])

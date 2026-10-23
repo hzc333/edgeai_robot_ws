@@ -56,8 +56,10 @@ export EDGEAI_CONFIG_DIR="$WS_DIR/config"
 
 echo "Starting EdgeAI simulation with robots: $ROBOTS"
 
+# Development mode without a competition phase manager: the safety watchdog
+# lets manual commands on /robot_N/cmd_vel_manual through (ADR-0003).
 ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py \
-    robots:="$ROBOTS" rviz:=true &
+    robots:="$ROBOTS" rviz:=true run_mode:=development require_competition_state:=false &
 SIM_PID=$!
 CHILD_PIDS+=("$SIM_PID")
 
