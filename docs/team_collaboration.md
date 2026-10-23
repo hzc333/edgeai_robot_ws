@@ -116,6 +116,7 @@ git diff --check origin/main
 ```
 
 - `pixi run test`最后一行必须是`0 errors, 0 failures`。CI每次推送都会运行同样的测试。
+- `pixi run test`按顺序运行各包测试，并使用独立的DDS域（默认42，可用环境变量`EDGEAI_TEST_DOMAIN_ID`修改）且只在本机通信，避免测试之间、测试与正在运行的仿真或网络中的真机互相干扰。自己写的测试如果会发布`/competition/state`、急停等全局话题，必须在测试结束时销毁节点，不要依赖其他测试的状态。
 - 调试时可以只测自己的包：`pixi run bash -c "source install/setup.bash && colcon test --packages-select 包名 && colcon test-result --verbose"`。但推送前必须跑全部测试。
 - 改动影响仿真或运行行为时，按自己包README中的验证步骤实际运行一次。
 - 同时检查README是否已随代码更新（第4节）。

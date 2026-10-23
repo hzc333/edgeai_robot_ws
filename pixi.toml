@@ -10,7 +10,9 @@ version = "0.1.0"
 [tasks]
 build = "colcon build --symlink-install"
 # 运行全部包的测试；任一测试失败时返回非零（由colcon test-result决定）。需先执行build。
-test = "bash -c 'source install/setup.bash && colcon test --event-handlers console_cohesion+ ; colcon test-result --verbose'"
+# 各包按顺序运行，并使用独立的DDS域（默认42，可用EDGEAI_TEST_DOMAIN_ID覆盖）且只在本机通信：
+# 测试会发布/competition/state、急停等全局话题，不能与其他测试、正在运行的仿真或网络中的真机互相干扰。
+test = "bash -c 'source install/setup.bash && export ROS_DOMAIN_ID=${EDGEAI_TEST_DOMAIN_ID:-42} ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && colcon test --executor sequential --event-handlers console_cohesion+ ; colcon test-result --verbose'"
 validate = "python tools/validate_project_contracts.py"
 check-env = "bash -c 'source install/setup.bash && python tools/check_environment.py'"
 
