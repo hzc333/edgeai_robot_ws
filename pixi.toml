@@ -49,6 +49,13 @@ ros-jazzy-cv-bridge = ">=4.1.0,<5"
 libopencv = "4.12.*"
 py-opencv = "4.12.*"
 
+# colcon（0.19）以`setup.py develop --editable`实现ament_python包的--symlink-install，
+# setuptools 80起移除了该选项，导致Python包构建失败。升级colcon并验证后再放开。
+setuptools = "<80"
+# Jazzy的launch_testing（9.x）pytest插件仍使用pytest 9已移除的`path`钩子参数，
+# 不固定会导致所有ROS包的colcon test在收集阶段报错。
+pytest = "<9"
+
 # 契约校验与配置解析。
 jsonschema = ">=4.18,<5"
 pyyaml = ">=6,<7"
