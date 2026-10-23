@@ -32,7 +32,7 @@ Pixi环境包含Nav2完整导航栈、SLAM Toolbox、rosbag2（含MCAP存储）�
 
 ```bash
 pixi run build
-pixi run bash -c "source install/setup.bash && python tools/check_environment.py"
+pixi run check-env
 ```
 
 使用系统ROS时运行`python3 tools/check_environment.py --allow-system-opencv`，OpenCV不一致会降级为警告，但仍会明确提示。
@@ -42,13 +42,14 @@ pixi run bash -c "source install/setup.bash && python tools/check_environment.py
 ## 安装与构建
 
 ```bash
-git clone https://github.com/dongjw-hit/edgeai_robot_ws.git
+git clone https://github.com/hzc333/edgeai_robot_ws.git
 cd edgeai_robot_ws
+git remote add upstream https://github.com/dongjw-hit/edgeai_robot_ws.git   # 组织方基线，只读
 pixi install --locked
 pixi run build
 ```
 
-`pixi run build`等价于`pixi run colcon build --symlink-install`；`pixi run validate`执行共享契约检查。
+常用命令：`pixi run build`（`colcon build --symlink-install`）、`pixi run test`（全部包的测试）、`pixi run validate`（共享契约检查）、`pixi run check-env`（环境一致性检查）。协作流程见[小组GitHub协作流程](docs/team_collaboration.md)。
 
 请在仓库根目录运行这些命令。修改ROS包资源或新增配置文件后，需要重新构建。
 

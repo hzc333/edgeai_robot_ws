@@ -25,12 +25,13 @@
 
 ```bash
 pixi run build
-pixi run bash -c "source install/setup.bash && colcon test && colcon test-result --verbose"
+pixi run test
 pixi run validate
+pixi run check-env
 git diff --check origin/main
 ```
 
-测试必须0失败。涉及共享接口或公共包时，必须重新构建并测试全部包。推送后CI会在锁定环境中构建工作空间并运行环境与契约检查；CI失败时由推送者尽快修复。
+测试必须0失败。推送后CI会在锁定环境中构建工作空间，并运行环境检查、全部测试和契约检查；CI失败时由推送者尽快修复。
 
 修改`pixi.toml`时必须同时提交重新生成的`pixi.lock`，并在提交说明中写明新增、升级或删除的包。OpenCV系列升级需要P3同意，ROS核心包升级需要P1和P5同意。
 
@@ -38,4 +39,5 @@ git diff --check origin/main
 
 - 接口破坏性修改增加包版本及持久化`schema_version`。
 - 每次比赛演练使用唯一`run_id`并记录Git提交。
-- 发布候选版本必须固定规则版本、配置、模型、组件版本和依赖锁文件，并打上`release/YYYY-MM-DD`标签。
+- 里程碑和比赛只使用打过标签的版本（`rehearsal-`、`milestone-`、`competition-`），标签必须固定规则版本、配置、模型、组件版本和依赖锁文件。已推送的标签不移动、不删除。
+- 里程碑评审和比赛前3天冻结`main`，只允许经第二人检查的缺陷修复。详见`docs/team_collaboration.md`第7节。

@@ -30,6 +30,8 @@ jobs:
       - name: Build workspace in the locked environment
         run: pixi run build
       - name: Check environment consistency
-        run: pixi run bash -c "source install/setup.bash && python tools/check_environment.py"
+        run: pixi run check-env
+      - name: Run all package tests
+        run: pixi run test
       - name: Validate shared contracts in the locked environment
         run: pixi run validate
