@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Start the Gazebo world and one or more simulated robots (ADR-0002).
+"""
+Start the Gazebo world and one or more simulated robots (ADR-0002).
 
-Example:
-  ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot_2
+Usage: ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot_2
 """
 
 import os
