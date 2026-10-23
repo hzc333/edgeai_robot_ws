@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>edgeai_robot_navigation</name>
+  <version>0.0.0</version>
+  <description>P1 navigation: per-robot Nav2 and AMCL configuration and launch, and the localization node providing the relocalize service.</description>
+  <maintainer email="huangzc333@gmail.com">hzc333</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>edgeai_robot_interfaces</depend>
+  <depend>edgeai_common</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <depend>lifecycle_msgs</depend>
+  <depend>std_srvs</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>navigation2</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_collision_monitor</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

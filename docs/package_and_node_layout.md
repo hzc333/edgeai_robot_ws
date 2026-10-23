@@ -18,6 +18,7 @@ bringup/navigation/exploration/perception/fusion/coordinator/mission/system
 | 包 | 负责人 | 主要节点/内容 | 禁止包含 |
 |---|---|---|---|
 | `edgeai_robot_interfaces` | P5治理，生产方与消费方共同审核 | 共享msg/srv/action | 算法和运行节点 |
+| `edgeai_common` | P5（P1临时创建） | 运行模式参数解析、QoS、帧名工具；无运行节点 | 业务逻辑和运行节点 |
 | `edgeai_robot_description` | P1 | URDF、世界、传感器、基础仿真 | 任务逻辑 |
 | `edgeai_robot_bringup` | P1 | `robot_agent`、多机器人启动、驱动配置、安全看门狗 | 探索和任务分配 |
 | `edgeai_robot_navigation` | P1 | Nav2参数、定位、恢复、动作适配器 | 全局机器人分配 |
