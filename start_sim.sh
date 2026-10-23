@@ -43,19 +43,22 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "Starting EdgeAI realistic robot simulation..."
+# Number of robots to spawn (1-4); robot IDs are robot_1 .. robot_N.
+ROBOT_COUNT="${1:-1}"
+if ! [[ "$ROBOT_COUNT" =~ ^[1-4]$ ]]; then
+    echo "Usage: $0 [robot_count 1-4]"
+    exit 1
+fi
+ROBOTS="$(seq -s, -f 'robot_%g' 1 "$ROBOT_COUNT")"
 
-ros2 launch edgeai_robot_description simulation_real.launch.py &
+# Launch files and nodes locate the repository config/ through this variable.
+export EDGEAI_CONFIG_DIR="$WS_DIR/config"
+
+echo "Starting EdgeAI simulation with robots: $ROBOTS"
+
+ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py \
+    robots:="$ROBOTS" rviz:=true &
 SIM_PID=$!
 CHILD_PIDS+=("$SIM_PID")
-
-sleep 5
-
-echo "Starting RViz..."
-
-rviz2 -d \
-    "$WS_DIR/src/edgeai_robot_description/rviz/realistic_robot.rviz" &
-RVIZ_PID=$!
-CHILD_PIDS+=("$RVIZ_PID")
 
 wait "$SIM_PID"

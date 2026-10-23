@@ -1,0 +1,9 @@
+# 仅仿真开发使用，不代表比赛起始区。
+# 位姿为base_footprint（驱动轮轴中点，ADR-0002）在Gazebo世界坐标系中的位置，
+# 4台机器人位于当前世界西南角的空地中，彼此相距0.7 m。
+schema_version: 1
+robots:
+  robot_1: {x: -1.5, y: -1.5, yaw: 0.0}
+  robot_2: {x: -1.5, y: -0.8, yaw: 0.0}
+  robot_3: {x: -0.8, y: -1.5, yaw: 0.0}
+  robot_4: {x: -0.8, y: -0.8, yaw: 0.0}

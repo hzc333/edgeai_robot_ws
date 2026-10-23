@@ -66,12 +66,19 @@ colcon build --symlink-install
 在仓库根目录运行：
 
 ```bash
-./start_sim.sh
+./start_sim.sh        # 1台机器人robot_1
+./start_sim.sh 2      # robot_1和robot_2，最多4台
 ```
 
-该脚本会根据自身位置确定工作空间路径，优先激活Pixi环境；若Pixi不可用，则加载系统ROS 2 Jazzy。随后它会加载`install/setup.bash`、启动`simulation_real.launch.py`，并使用`realistic_robot.rviz`打开RViz。运行前必须已完成构建，而且脚本不依赖固定的主目录路径。在脚本所在终端按**Ctrl+C**即可停止整个会话。
+该脚本会根据自身位置确定工作空间路径，优先激活Pixi环境；若Pixi不可用，则加载系统ROS 2 Jazzy。随后它加载`install/setup.bash`，导出`EDGEAI_CONFIG_DIR`，启动`edgeai_robot_bringup`的`sim_multi_robot.launch.py`并打开RViz（1台时用`realistic_robot.rviz`，多台时用`multi_robot.rviz`）。运行前必须已完成构建。在脚本所在终端按**Ctrl+C**即可停止整个会话。
 
-启动文件会加载`edgeai_robot_real.urdf.xacro`，使用`worlds/empty.sdf`启动仿真世界，生成`edgeai_robot_real`机器人，并启动ROS–Gazebo桥接和机器人坐标变换。旧版简单模型及其启动脚本已被移除；当前统一入口是`start_sim.sh`。
+多机器人约定见[ADR-0002](docs/decisions/0002-multi-robot-tf-and-naming.md)：每台机器人的话题位于`/robot_N/`下，坐标系带`robot_N/`前缀，出生位姿在`config/sim/robots.yaml`中。不带图形界面运行（CI或远程机）：
+
+```bash
+ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot_2 headless:=true
+```
+
+单独的启动文件：`edgeai_robot_description`中的`sim_world.launch.py`（世界和`/clock`，只启动一次）和`sim_robot.launch.py`（一台机器人，参数`robot_id`、`x`、`y`、`yaw`）。`simulation_real.launch.py`保留为“世界加robot_1”的兼容入口。
 
 可移植的真实模型启动流程已经测试通过。AMCL定位仍属于本地实验，其启动文件和参数文件没有包含在本仓库中。环境中已安装AMCL依赖并不表示定位或自主导航已经完成。
 
@@ -98,25 +105,29 @@ source install/setup.bash
 
 ### 主要话题
 
+下表以`robot_1`为例，其他机器人把前缀换成`robot_N`。
+
 | 话题 | ROS消息类型 | 用途 |
 | --- | --- | --- |
-| `/cmd_vel` | `geometry_msgs/msg/Twist` | 机器人速度指令 |
-| `/odom` | `nav_msgs/msg/Odometry` | Gazebo差速驱动里程计 |
-| `/tf` | `tf2_msgs/msg/TFMessage` | 动态坐标变换，包括`odom` → `base_footprint` |
-| `/tf_static` | `tf2_msgs/msg/TFMessage` | 机器人及传感器固定坐标变换 |
-| `/joint_states` | `sensor_msgs/msg/JointState` | 仿真关节状态 |
-| `/scan` | `sensor_msgs/msg/LaserScan` | LiDAR扫描数据 |
-| `/camera/image` | `sensor_msgs/msg/Image` | RGB图像 |
-| `/camera/depth_image` | `sensor_msgs/msg/Image` | 深度图像 |
-| `/camera/camera_info` | `sensor_msgs/msg/CameraInfo` | 相机标定信息 |
+| `/robot_1/cmd_vel` | `geometry_msgs/msg/Twist` | 机器人速度指令 |
+| `/robot_1/odom` | `nav_msgs/msg/Odometry` | Gazebo差速驱动里程计 |
+| `/robot_1/joint_states` | `sensor_msgs/msg/JointState` | 仿真关节状态 |
+| `/robot_1/scan` | `sensor_msgs/msg/LaserScan` | LiDAR扫描数据（Best Effort） |
+| `/robot_1/imu` | `sensor_msgs/msg/Imu` | IMU（100 Hz） |
+| `/robot_1/camera/image` | `sensor_msgs/msg/Image` | RGB图像，帧`robot_1/camera_optical_frame` |
+| `/robot_1/camera/depth_image` | `sensor_msgs/msg/Image` | 深度图像 |
+| `/robot_1/camera/camera_info` | `sensor_msgs/msg/CameraInfo` | 相机标定信息 |
+| `/robot_1/robot_description` | `std_msgs/msg/String` | 机器人模型 |
+| `/tf` | `tf2_msgs/msg/TFMessage` | 全局动态TF，包括`robot_1/odom` → `robot_1/base_footprint` |
+| `/tf_static` | `tf2_msgs/msg/TFMessage` | 全局静态TF |
 | `/clock` | `rosgraph_msgs/msg/Clock` | 仿真时间 |
 | `/map` | `nav_msgs/msg/OccupancyGrid` | SLAM Toolbox运行时生成的占据栅格地图 |
 
-保存的RViz配置使用`odom`作为固定坐标系。可以通过以下命令查看可用话题和一条里程计消息：
+单机器人RViz配置使用`robot_1/odom`作为固定坐标系，多机器人配置使用`map`（需要SLAM或定位运行后才有）。查看话题和一条里程计消息：
 
 ```bash
 ros2 topic list
-ros2 topic echo /odom --once
+ros2 topic echo /robot_1/odom --once
 ```
 
 ### 移动与停止
@@ -124,18 +135,18 @@ ros2 topic echo /odom --once
 确认机器人前方没有障碍后，发送低速前进指令：
 
 ```bash
-ros2 topic pub --rate 10 /cmd_vel geometry_msgs/msg/Twist \
+ros2 topic pub --rate 10 /robot_1/cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.1}, angular: {z: 0.0}}'
 ```
 
 按**Ctrl+C**停止发布器，然后必须显式发送零速度指令：
 
 ```bash
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist \
+ros2 topic pub --once /robot_1/cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.0}, angular: {z: 0.0}}'
 ```
 
-不能把“停止速度发布器”等同于“机器人已经收到停止命令”。
+不能把“停止速度发布器”等同于“机器人已经收到停止命令”。速度安全链（[ADR-0003](docs/decisions/0003-velocity-safety-chain.md)）上线后，`/robot_N/cmd_vel`只由`safety_watchdog`发布，手动控制改为在开发模式下发布到`/robot_N/cmd_vel_manual`。
 
 ## 使用SLAM Toolbox建图
 
@@ -147,7 +158,7 @@ ros2 launch slam_toolbox online_async_launch.py \
   use_sim_time:=true
 ```
 
-仓库配置使用`/scan`、`base_footprint`、`odom`和`map`，启用建图模式，地图分辨率为0.05米。仿真时间来自桥接后的`/clock`话题。仿真启动脚本不会自动启动SLAM。
+仓库配置为`robot_1`建图：使用`/robot_1/scan`、`robot_1/base_footprint`、`robot_1/odom`和`map`，启用建图模式，地图分辨率为0.05米。仿真时间来自桥接后的`/clock`话题。仿真启动脚本不会自动启动SLAM。
 
 SLAM启动后，在RViz中将**Fixed Frame**设置为`map`，并添加一个订阅`/map`的**Map**显示项。让机器人在空旷区域缓慢行驶以收集扫描数据，并适当回到已经观察过的区域。避免机器人长时间接触墙壁或障碍物。
 
