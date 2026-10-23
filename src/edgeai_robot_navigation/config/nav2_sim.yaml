@@ -94,11 +94,13 @@ controller_server:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.10
       movement_time_allowance: 10.0
-    # Per-goal tolerances are checked by robot_agent (plan 2-12).
+    # robot_agent checks each goal's own tolerance (plan 2-12). Nav2 stops as soon as
+    # it is inside this tolerance and a repeated goal does not move the robot, so it
+    # must be tighter than any requested tolerance (rescue arrival: 0.08 m).
     general_goal_checker:
       stateful: true
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.10
+      xy_goal_tolerance: 0.05
       yaw_goal_tolerance: 0.25
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"

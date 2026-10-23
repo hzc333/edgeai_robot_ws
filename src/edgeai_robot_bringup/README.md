@@ -6,13 +6,16 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 |---|---|
 | 负责人 | P1（hzc333） |
 | 已完成 | 多机器人仿真启动；`safety_watchdog`（ADR-0003）及其测试；`robot_stack.launch.py`（看门狗 + 可选Nav2），2026-10-24验证 |
-| 未实现 | `robot_agent`（RobotState、阶段确认、两个动作服务器）、实机启动 |
+| 部分完成 | `robot_agent`：RobotState、阶段确认、`execute_navigation_goal`已实现并通过模拟Nav2测试；**尚未接入`robot_stack.launch.py`，也未在真实Nav2仿真中验收**；`execute_rescue_task`属于计划3-04 |
+| 未实现 | 实机启动 |
 
 ## 1. 文件清单
 
 | 文件 | 作用 |
 |---|---|
 | `edgeai_robot_bringup/safety_watchdog.py` | 看门狗节点，入口`ros2 run edgeai_robot_bringup safety_watchdog`；门控逻辑是纯函数`decide()`，便于测试 |
+| `edgeai_robot_bringup/robot_agent.py` | 机器人代理节点，入口`ros2 run edgeai_robot_bringup robot_agent`：10 Hz发布`state`、2 Hz发布`phase_ack`，提供`execute_navigation_goal`（内部调用Nav2 `navigate_to_pose`，到达后检查目标自身容差，不满足时再逼近一次；结束时取消Nav2并等待里程计确认停车，超时则报告`CODE_COMMAND_TIMEOUT`）。Nav2错误码104～106映射为BLOCKED，其余为FAILED；碰撞监视器持续停车超过5 s也判BLOCKED |
+| `test/test_robot_agent.py` | 代理测试：纯逻辑（模式优先级、错误码映射、容差和协方差判定）和使用模拟Nav2/TF/里程计/AMCL的18项行为测试 |
 | `launch/robot_stack.launch.py` | 在`/robot_N`命名空间启动一台机器人的软件栈：看门狗，以及`nav_mode`不为`none`时的Nav2；按运行模式解析参数 |
 | `launch/sim_multi_robot.launch.py` | 启动Gazebo世界、1～4台仿真机器人以及各自的软件栈，可选RViz |
 | `test/test_safety_watchdog.py` | 看门狗测试：纯逻辑测试和ROS通信测试（见第5节） |

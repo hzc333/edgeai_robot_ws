@@ -272,11 +272,11 @@ class MockRobotAgent(Node):
             self.active_goal = None
             self.abort_request = None
         if goal_handle.is_cancel_requested:
-            goal_handle.canceled()
+            goal_handle.canceled(result)
         elif terminal_state in ('succeeded',):
-            goal_handle.succeed()
+            goal_handle.succeed(result)
         else:
-            goal_handle.abort()
+            goal_handle.abort(result)
         return result
 
     # ------------------------------------------------------------- navigation

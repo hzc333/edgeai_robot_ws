@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'safety_watchdog = edgeai_robot_bringup.safety_watchdog:main',
+            'robot_agent = edgeai_robot_bringup.robot_agent:main',
         ],
     },
 )
