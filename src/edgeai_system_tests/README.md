@@ -10,6 +10,17 @@
 
 Mock必须使用`edgeai_robot_interfaces`的真实消息、服务和动作，语义与正式模块一致。**正式比赛启动文件禁止包含任何Mock。**
 
+## 文件清单
+
+| 文件 | 维护人 | 作用 |
+|---|---|---|
+| `edgeai_system_tests/mocks/mock_robot_agent.py` | P1 | 模拟机器人代理节点，入口`ros2 run edgeai_system_tests mock_robot_agent` |
+| `launch/mock_two_robots.launch.py` | P1 | 同时启动robot_1（-1.5, -1.5）和robot_2（-1.5, -0.8）两个Mock |
+| `test/test_mock_robot_agent.py` | P1 | 11项Mock行为测试（见下文） |
+| `edgeai_system_tests/__init__.py`、`mocks/__init__.py` | P5 | 包入口 |
+| `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | P5 | 版权头、代码风格和文档字符串检查 |
+| `setup.py`、`setup.cfg`、`package.xml`、`resource/` | P5 | `ament_python`包配置 |
+
 ## mock_robot_agent（P1维护）
 
 代替P1的机器人代理，提供与正式代理相同的接口：
@@ -60,6 +71,18 @@ ros2 run edgeai_system_tests mock_robot_agent --ros-args -r __ns:=/robot_2 \
 ```
 
 ## 测试
+
+`test/test_mock_robot_agent.py`在同一进程中启动Mock和一个模拟边缘节点（发布`CompetitionState`和急停、调用动作和服务），覆盖：导航成功；非运动阶段拒绝目标；已有活动目标时拒绝第二个；注入导航失败；取消导航；急停打断导航且旧`generation`被忽略；救援保持直到被释放；保持超时；阶段变化取消目标并发送匹配`phase_sequence`的确认；心跳丢失进入`MODE_SAFE`；重新定位成功和失败。
+
+2026-10-23：包内全部测试通过，连续运行3次结果一致。
+
+### 已知限制
+
+- Mock按“先转向、再直行”的运动学积分位姿，不考虑障碍物，也不模拟传感器。
+- `MODE_GLOBAL`重新定位时，Mock直接认为找到当前位姿。
+- 阶段确认以2 Hz持续发布当前`phase_sequence`；“阶段管理器确认后停止发送”的握手尚无对应接口。
+
+### 运行
 
 ```bash
 colcon test --packages-select edgeai_system_tests && colcon test-result --verbose

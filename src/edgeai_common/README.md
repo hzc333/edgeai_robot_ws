@@ -7,6 +7,19 @@
 | 负责人 | P5（接口与公共设施治理） |
 | 当前实现 | P1临时创建（2026-10-23），供`mock_robot_agent`和P1节点使用；P5接手后可调整 |
 
+## 文件清单
+
+| 文件 | 作用 |
+|---|---|
+| `edgeai_common/config.py` | 查找`config/`目录，按运行模式解析`competition_parameters.yaml`，读取`interface_runtime.yaml` |
+| `edgeai_common/qos.py` | 按运行时契约生成`QoSProfile` |
+| `edgeai_common/frames.py` | 机器人ID校验、带前缀的帧名和话题名 |
+| `edgeai_common/__init__.py` | 包入口 |
+| `test/test_config.py` | 解析规则测试：官方值优先、回退记录、比赛模式拒绝缺失参数、开发模式允许缺失、未知模式报错，以及对仓库真实配置的解析 |
+| `test/test_qos_and_frames.py` | QoS映射、帧名和非法机器人ID测试 |
+| `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
+| `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置 |
+
 ## 模块
 
 - `edgeai_common.config`：查找仓库根目录`config/`，并按运行模式解析`competition_parameters.yaml`。
@@ -20,9 +33,16 @@
 
 节点不要自己读YAML，也不要自己实现回退逻辑：由启动文件调用`resolve_parameters`，把需要的值作为ROS参数传给节点。统一的参数解析服务完成后（P2的`system_manager`生成`system/parameters.yaml`），只需修改启动文件。
 
+## 已知限制
+
+- 参数解析目前由各启动文件调用；P2的`system_manager`生成统一的`system/parameters.yaml`后，启动文件应改为读取该文件。
+- 解析结果中，`aruco.id_mapping`、`localization.start_poses`、`localization.task2b_start_poses`作为整体处理（不逐项合并）。
+
 ## 测试
 
 ```bash
 colcon build --symlink-install --packages-select edgeai_common
 colcon test --packages-select edgeai_common && colcon test-result --verbose
 ```
+
+2026-10-23：16项测试全部通过。
