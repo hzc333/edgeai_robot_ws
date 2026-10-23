@@ -23,6 +23,11 @@
       filename="gz-sim-scene-broadcaster-system"
       name="gz::sim::systems::SceneBroadcaster"/>
 
+    <!-- Required for the robot IMU sensors -->
+    <plugin
+      filename="gz-sim-imu-system"
+      name="gz::sim::systems::Imu"/>
+
     <!-- Required for GPU LiDAR / camera sensors -->
     <plugin
       filename="gz-sim-sensors-system"

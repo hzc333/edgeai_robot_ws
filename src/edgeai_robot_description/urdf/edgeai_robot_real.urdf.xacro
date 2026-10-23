@@ -3,6 +3,13 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro"
        name="edgeai_robot_real">
 
+  <!-- Robot identity (ADR-0002). Link and joint names stay unprefixed;
+       robot_state_publisher adds the prefix through frame_prefix. Topics and
+       frames produced by Gazebo itself are prefixed explicitly below. -->
+  <xacro:arg name="robot_id" default="robot_1"/>
+  <xacro:property name="robot_id" value="$(arg robot_id)"/>
+  <xacro:property name="prefix" value="${robot_id}/"/>
+
   <!-- Parameters -->
 
   <!-- Lower folded-aluminum chassis -->
@@ -653,16 +660,16 @@
     <always_on>true</always_on>
     <update_rate>30</update_rate>
 
-    <topic>camera</topic>
+    <topic>/${robot_id}/camera</topic>
 
     <!-- Frame of the sensor body. The image, depth and camera_info headers use
          the optical frame set inside <camera>; an <optical_frame_id> placed
          directly under <sensor> is ignored by SDFormat. -->
-    <gz_frame_id>camera_link</gz_frame_id>
+    <gz_frame_id>${prefix}camera_link</gz_frame_id>
 
     <camera>
 
-      <optical_frame_id>camera_optical_frame</optical_frame_id>
+      <optical_frame_id>${prefix}camera_optical_frame</optical_frame_id>
 
       <horizontal_fov>1.047</horizontal_fov>
 
@@ -736,10 +743,10 @@
       <pose>0 0 0 0 0 0</pose>
 
       <!-- Gazebo Transport topic -->
-      <topic>/scan</topic>
+      <topic>/${robot_id}/scan</topic>
 
       <!-- Frame carried in the LiDAR message -->
-      <gz_frame_id>lidar_link</gz_frame_id>
+      <gz_frame_id>${prefix}lidar_link</gz_frame_id>
 
       <update_rate>10</update_rate>
 
@@ -785,13 +792,21 @@
       <wheel_radius>${wheel_radius}</wheel_radius>
 
       <!-- Gazebo command / odometry topics -->
-      <topic>/cmd_vel</topic>
-      <odom_topic>/odom</odom_topic>
-      <tf_topic>/tf</tf_topic>
+      <topic>/${robot_id}/cmd_vel</topic>
+      <odom_topic>/${robot_id}/odom</odom_topic>
+      <tf_topic>/${robot_id}/tf</tf_topic>
 
       <!-- Odometry frame -->
-      <frame_id>odom</frame_id>
-      <child_frame_id>base_footprint</child_frame_id>
+      <frame_id>${prefix}odom</frame_id>
+      <child_frame_id>${prefix}base_footprint</child_frame_id>
+
+      <!-- Physical limits of the drive (development values; replace with the
+           measured motor limits). Competition speed limits are enforced by
+           safety_watchdog (ADR-0003), not here. -->
+      <max_linear_velocity>0.30</max_linear_velocity>
+      <max_angular_velocity>1.00</max_angular_velocity>
+      <max_linear_acceleration>0.50</max_linear_acceleration>
+      <max_angular_acceleration>1.50</max_angular_acceleration>
 
       <!-- Odometry publishing -->
       <odom_publish_frequency>50</odom_publish_frequency>
@@ -803,7 +818,44 @@
   <plugin
     filename="gz-sim-joint-state-publisher-system"
     name="gz::sim::systems::JointStatePublisher">
-    <topic>joint_states</topic>
+    <topic>/${robot_id}/joint_states</topic>
   </plugin>
 </gazebo>
+
+  <!-- ====================================================== -->
+  <!-- IMU (PhidgetSpatial Precision on the real robot)       -->
+  <!-- ====================================================== -->
+
+  <!-- Mounting position is a placeholder at the base_link origin until it is
+       measured on the real robot. -->
+  <link name="imu_link"/>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <topic>/${robot_id}/imu</topic>
+      <gz_frame_id>${prefix}imu_link</gz_frame_id>
+      <!-- Placeholder Gaussian noise of a typical MEMS IMU, not taken from the
+           PhidgetSpatial datasheet; replace after hardware characterisation. -->
+      <imu>
+        <angular_velocity>
+          <x><noise type="gaussian"><mean>0</mean><stddev>0.002</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0</mean><stddev>0.002</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0</mean><stddev>0.002</stddev></noise></z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev></noise></z>
+        </linear_acceleration>
+      </imu>
+    </sensor>
+  </gazebo>
 </robot>

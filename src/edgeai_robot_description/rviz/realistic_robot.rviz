@@ -61,10 +61,10 @@ Visualization Manager:
       Description Source: Topic
       Description Topic:
         Depth: 5
-        Durability Policy: Volatile
+        Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /robot_description
+        Value: /robot_1/robot_description
       Enabled: true
       Links:
         All Links Enabled: true
@@ -167,8 +167,8 @@ Visualization Manager:
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /scan
+        Reliability Policy: Best Effort
+        Value: /robot_1/scan
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
@@ -200,8 +200,8 @@ Visualization Manager:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /camera/points
+        Reliability Policy: Best Effort
+        Value: /robot_1/camera/points
       Use Fixed Frame: true
       Use rainbow: true
       Value: false
@@ -216,8 +216,8 @@ Visualization Manager:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /camera/image
+        Reliability Policy: Best Effort
+        Value: /robot_1/camera/image
       Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
@@ -230,8 +230,8 @@ Visualization Manager:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /camera/depth_image
+        Reliability Policy: Best Effort
+        Value: /robot_1/camera/depth_image
       Value: true
     - Alpha: 0.699999988079071
       Binary representation: false
@@ -259,7 +259,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: odom
+    Fixed Frame: robot_1/odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -279,7 +279,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /initialpose
+        Value: /robot_1/initialpose
     - Class: rviz_default_plugins/SetGoal
       Topic:
         Depth: 5
