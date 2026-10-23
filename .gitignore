@@ -18,3 +18,8 @@ frames_*.pdf
 # Editor / temporary files
 *~
 *.swp
+
+# Competition run outputs and recordings (keep only intentionally exported files)
+runs/
+*.mcap
+*.db3
