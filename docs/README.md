@@ -7,7 +7,9 @@
 3. [开发与集成计划](development_and_integration_plan.md)
 4. [规则假设与TBD登记表](rule_assumptions_and_tbd.md)
 5. [ROS包、节点与所有权规划](package_and_node_layout.md)
-6. [首版Task 1策略决策](decisions/0001-task1-v1-strategy.md)
+6. [首版Task 1策略决策](decisions/0001-task1-v1-strategy.md)（ADR-0001）
+   - [多机器人TF、命名和机器人参考点](decisions/0002-multi-robot-tf-and-naming.md)（ADR-0002，提议中）
+   - [速度安全链与运动门控](decisions/0003-velocity-safety-chain.md)（ADR-0003，提议中）
 7. [Mock与集成测试计划](mock_and_test_plan.md)
 8. [Marker坐标约定与救援区几何](marker_and_rescue_geometry.md)
 9. [小组GitHub协作流程](team_collaboration.md)
