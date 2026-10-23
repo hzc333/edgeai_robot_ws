@@ -117,10 +117,13 @@
 
   <!-- Fixed connection between ground reference and chassis -->
 
+  <!-- base_footprint is the drive-axle midpoint on the ground (ADR-0002).
+       The differential drive rotates about this point, so wheel odometry
+       integrated by DiffDrive is only correct for this reference frame. -->
   <joint name="base_footprint_joint" type="fixed">
     <parent link="base_footprint"/>
     <child link="base_link"/>
-    <origin xyz="0 0 0.049" rpy="0 0 0"/>
+    <origin xyz="${-wheel_x} 0 ${wheel_radius}" rpy="0 0 0"/>
   </joint>
 
 
@@ -652,9 +655,14 @@
 
     <topic>camera</topic>
 
-    <optical_frame_id>camera_optical_frame</optical_frame_id>
+    <!-- Frame of the sensor body. The image, depth and camera_info headers use
+         the optical frame set inside <camera>; an <optical_frame_id> placed
+         directly under <sensor> is ignored by SDFormat. -->
+    <gz_frame_id>camera_link</gz_frame_id>
 
     <camera>
+
+      <optical_frame_id>camera_optical_frame</optical_frame_id>
 
       <horizontal_fov>1.047</horizontal_fov>
 
