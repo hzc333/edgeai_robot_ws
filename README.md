@@ -109,7 +109,6 @@ source install/setup.bash
 | `/camera/image` | `sensor_msgs/msg/Image` | RGB图像 |
 | `/camera/depth_image` | `sensor_msgs/msg/Image` | 深度图像 |
 | `/camera/camera_info` | `sensor_msgs/msg/CameraInfo` | 相机标定信息 |
-| `/camera/points` | `sensor_msgs/msg/PointCloud2` | RGB-D点云 |
 | `/clock` | `rosgraph_msgs/msg/Clock` | 仿真时间 |
 | `/map` | `nav_msgs/msg/OccupancyGrid` | SLAM Toolbox运行时生成的占据栅格地图 |
 
@@ -165,6 +164,14 @@ ros2 run nav2_map_server map_saver_cli -f "$PWD/maps/my_map" \
 该命令会生成`maps/my_map.yaml`及其对应的地图图像。每次需要保留新地图时，请使用新的文件基本名称。这些文件是占据栅格地图导出结果，并不是可用于恢复SLAM建图会话的SLAM Toolbox序列化位姿图。
 
 ROS包中还包含`src/edgeai_robot_description/maps/edgeai_arena.yaml`及对应地图图像。保存`maps/my_map`不会覆盖包内自带地图。
+
+## 与组织方指南的差异（ADR-0002）
+
+本仓库对组织方基线做了两处几何修正，`Initial_Robot_Simulation_and_SLAM_Guide.md`中的部分数值因此不再适用：
+
+- **`base_footprint`位于驱动轮轴中点。**原基线的`base_footprint`在`base_link`正下方，比实际旋转中心靠后0.0875 m，原地旋转约180°会产生约0.18 m的里程计误差。修正后，`lidar_link`相对`base_footprint`约为(0.0125, 0.080, 0.155) m，`camera_link`约为(0.0875, 0, 0.100) m。
+- **相机图像使用光学坐标系。**`/camera/image`、`/camera/depth_image`和`/camera/camera_info`的`frame_id`为`camera_optical_frame`（x右、y下、z前）。原基线的零旋转兼容TF已删除。
+- **仿真不再桥接`/camera/points`。**Gazebo的RGB-D点云数据使用`camera_link`轴向（x朝前），却以`camera_optical_frame`作为帧名，数据与帧名不一致。需要点云时，请用`depth_image_proc`由深度图和CameraInfo生成。实机RealSense驱动的点云不受影响。
 
 ## 已知限制：碰撞时里程计漂移
 

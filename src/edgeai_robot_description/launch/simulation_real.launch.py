@@ -96,30 +96,14 @@ def generate_launch_description():
             '/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
             '/camera/depth_image@sensor_msgs/msg/Image[gz.msgs.Image',
             '/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
-            '/camera/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
+            # /camera/points is not bridged: Gazebo fills the cloud in camera_link
+            # axes (x forward) but stamps it with camera_optical_frame, so the
+            # data and its frame disagree. Derive a cloud from depth_image and
+            # camera_info (e.g. depth_image_proc) when one is needed.
 
             # Clock
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
 
-        ]
-    )
-
-    # Static TF for Gazebo RGB-D camera sensor frame
-    camera_sensor_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='camera_sensor_tf',
-        output='screen',
-        arguments=[
-            '--x', '0',
-            '--y', '0',
-            '--z', '0',
-            '--roll', '0',
-            '--pitch', '0',
-            '--yaw', '0',
-            '--frame-id', 'camera_link',
-            '--child-frame-id',
-            'edgeai_robot_real/base_footprint/rgbd_camera',
         ]
     )
 
@@ -128,5 +112,4 @@ def generate_launch_description():
         robot_state_publisher,
         spawn_robot,
         bridge,
-        camera_sensor_tf,
     ])
