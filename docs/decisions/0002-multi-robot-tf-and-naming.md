@@ -36,7 +36,7 @@
 | `/robot_N/scan` | `sensor_msgs/LaserScan` | Sensor Data QoS |
 | `/robot_N/camera/image`、`/robot_N/camera/depth_image` | `sensor_msgs/Image` | Sensor Data QoS，`frame_id`为`robot_N/camera_optical_frame` |
 | `/robot_N/camera/camera_info` | `sensor_msgs/CameraInfo` | |
-| `/robot_N/camera/points` | `sensor_msgs/PointCloud2` | |
+| `/robot_N/camera/points` | `sensor_msgs/PointCloud2` | 仅实机；仿真不提供（见第4节） |
 | `/robot_N/robot_description` | `std_msgs/String` | |
 | `/robot_N/state`、`/robot_N/phase_ack` | 共享接口 | |
 | `/robot_N/execute_navigation_goal`、`/robot_N/execute_rescue_task` | 共享接口（动作） | |
@@ -60,6 +60,8 @@
 ### 4. 相机坐标系
 
 相机传感器在`<camera>`内设置`<optical_frame_id>robot_N/camera_optical_frame</optical_frame_id>`，在`<sensor>`下设置`<gz_frame_id>robot_N/camera_link</gz_frame_id>`。图像、深度图和CameraInfo的`frame_id`都是`robot_N/camera_optical_frame`（光学约定：x右、y下、z前）。
+
+仿真不提供`/robot_N/camera/points`。实测Gazebo的RGB-D点云数据使用`camera_link`轴向（x朝前），但消息头标的是光学坐标系，二者不一致；Gazebo也不能给图像和点云分别设置坐标系。需要点云时，用`depth_image_proc`从深度图和CameraInfo生成。实机RealSense驱动的点云坐标系正确，照常发布。
 
 ## 原因
 
