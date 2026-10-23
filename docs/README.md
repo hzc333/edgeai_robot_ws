@@ -10,6 +10,7 @@
 6. [首版Task 1策略决策](decisions/0001-task1-v1-strategy.md)
 7. [Mock与集成测试计划](mock_and_test_plan.md)
 8. [Marker坐标约定与救援区几何](marker_and_rescue_geometry.md)
+9. [小组GitHub协作流程](team_collaboration.md)
 
 配套的机器可读文件：
 
