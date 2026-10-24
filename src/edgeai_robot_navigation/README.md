@@ -80,7 +80,7 @@ ros2 service call /robot_1/lifecycle_manager_navigation/manage_nodes \
 | | 期望线速度 / 原地转向角速度 | `<MAX_LINEAR>` / `<MAX_ANGULAR>` | 开发值0.15 m/s / 0.30 rad/s |
 | | 前视距离 | 0.4 m（0.25～0.6） | |
 | | 先原地转向 | 是，偏差超过0.785 rad时 | 不允许倒车 |
-| | 目标容差 | xy 0.10 m，yaw 0.25 rad | 每个目标的精确容差由`robot_agent`处理（计划2-12） |
+| | 目标容差 | xy 0.05 m，yaw 0.25 rad | 必须小于任何请求的容差（救援到达0.08 m）：Nav2进入容差后即停止，重复发送同一目标不会再移动。每个目标自己的容差由`robot_agent`检查 |
 | | 无进展判定 | 10 s内移动不足0.10 m | |
 | `planner_server` | 规划器 | NavFn，`allow_unknown: true`，容差0.25 m | Task 1需要穿越未知区域规划 |
 | `behavior_server` | 恢复行为 | spin、backup、drive_on_heading、wait | 最大转速`<MAX_ANGULAR>` |
@@ -128,5 +128,7 @@ ros2 action send_goal /robot_1/navigate_to_pose nav2_msgs/action/NavigateToPose 
 
 - `relocalize`服务和`localization`节点尚未实现：初始位姿要手动发布，AMCL模式下导航要手动激活（2.2节）。
 - 两台机器人交会时，控制器出现过几次“controller patience exceeded”和“failed to make progress”，都由恢复行为自动处理，目标最终成功。双机器人协调和参数调整留到P1计划阶段3。
-- 每个目标的精确容差、失败和取消后确认零速度等行为属于`robot_agent`（计划2-12、2-13），尚未实现。
+- 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。
+- 上表10个目标的测试是在目标容差为0.10 m时做的；收紧到0.05 m后，通过`robot_agent`的精确目标测试成功（见bringup README）。
+- AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数偏大，待阶段3调参。
 - 参数只针对仿真；实机参数等实机接入时再定（计划阶段5）。

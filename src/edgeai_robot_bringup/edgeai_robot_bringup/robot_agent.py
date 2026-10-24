@@ -160,8 +160,11 @@ class RobotAgent(Node):
         self.require_state = p('require_competition_state', True).value
         self.localization_mode = p('localization_mode', 'amcl').value
         config_dir = p('config_dir', '').value or None
-        self.max_xy_std = float(p('localized_max_xy_std_m', 0.15).value)
-        self.max_yaw_std = float(p('localized_max_yaw_std_rad', 0.15).value)
+        # Limits for "still localized", not for relocalization convergence (plan 3-02
+        # uses 0.10 m). AMCL reports its particle spread: in simulation it grew to about
+        # 0.31 m / 0.33 rad during a 4.7 m drive while the true error stayed near 0.1 m.
+        self.max_xy_std = float(p('localized_max_xy_std_m', 0.5).value)
+        self.max_yaw_std = float(p('localized_max_yaw_std_rad', 0.6).value)
         self.slam_variance = float(p('slam_pose_variance', 0.0025).value)
         self.tf_stale_s = float(p('tf_stale_s', 0.5).value)
         self.sensor_timeout_s = float(p('sensor_timeout_s', 1.0).value)

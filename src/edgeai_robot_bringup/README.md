@@ -6,7 +6,8 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 |---|---|
 | 负责人 | P1（hzc333） |
 | 已完成 | 多机器人仿真启动；`safety_watchdog`（ADR-0003）及其测试；`robot_stack.launch.py`（看门狗 + 可选Nav2），2026-10-24验证 |
-| 部分完成 | `robot_agent`：RobotState、阶段确认、`execute_navigation_goal`已实现并通过模拟Nav2测试；**尚未接入`robot_stack.launch.py`，也未在真实Nav2仿真中验收**；`execute_rescue_task`属于计划3-04 |
+| 已完成 | `robot_agent`：RobotState、阶段确认、`execute_navigation_goal`，已接入`robot_stack.launch.py`并用真实Nav2完成阶段2仿真验收（2026-10-24） |
+| 未实现 | `execute_rescue_task`（计划3-04）、`relocalize`（计划3-02，在`edgeai_robot_navigation`中） |
 | 未实现 | 实机启动 |
 
 ## 1. 文件清单
@@ -16,7 +17,7 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 | `edgeai_robot_bringup/safety_watchdog.py` | 看门狗节点，入口`ros2 run edgeai_robot_bringup safety_watchdog`；门控逻辑是纯函数`decide()`，便于测试 |
 | `edgeai_robot_bringup/robot_agent.py` | 机器人代理节点，入口`ros2 run edgeai_robot_bringup robot_agent`：10 Hz发布`state`、2 Hz发布`phase_ack`，提供`execute_navigation_goal`（内部调用Nav2 `navigate_to_pose`，到达后检查目标自身容差，不满足时再逼近一次；结束时取消Nav2并等待里程计确认停车，超时则报告`CODE_COMMAND_TIMEOUT`）。Nav2错误码104～106映射为BLOCKED，其余为FAILED；碰撞监视器持续停车超过5 s也判BLOCKED |
 | `test/test_robot_agent.py` | 代理测试：纯逻辑（模式优先级、错误码映射、容差和协方差判定）和使用模拟Nav2/TF/里程计/AMCL的18项行为测试 |
-| `launch/robot_stack.launch.py` | 在`/robot_N`命名空间启动一台机器人的软件栈：看门狗，以及`nav_mode`不为`none`时的Nav2；按运行模式解析参数 |
+| `launch/robot_stack.launch.py` | 在`/robot_N`命名空间启动一台机器人的软件栈：看门狗、机器人代理，以及`nav_mode`不为`none`时的Nav2；按运行模式解析参数 |
 | `launch/sim_multi_robot.launch.py` | 启动Gazebo世界、1～4台仿真机器人以及各自的软件栈，可选RViz |
 | `test/test_safety_watchdog.py` | 看门狗测试：纯逻辑测试和ROS通信测试（见第5节） |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
@@ -71,7 +72,77 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 
 节点退出时会再发布一次零速度。
 
-## 3. robot_stack.launch.py
+## 3. robot_agent
+
+机器人与边缘之间的唯一接口（P1计划2-10～2-14）。边缘节点只调用它，不直接调用Nav2。代理**不发布速度**：结束目标时取消Nav2，由看门狗输出零速度，再用里程计确认停稳。
+
+### 3.1 接口
+
+| 名称（相对命名空间） | 类型 | 方向 | 说明 |
+|---|---|---|---|
+| `state` | `RobotState` | 发布，10 Hz，`robot_state` QoS | 见3.3节 |
+| `phase_ack` | `RobotPhaseAck` | 发布，2 Hz | 对应当前`phase_sequence` |
+| `execute_navigation_goal` | `ExecuteNavigationGoal`动作 | 服务端 | 见3.2节 |
+| `navigate_to_pose` | `nav2_msgs/NavigateToPose`动作 | 客户端 | Nav2 |
+| `lifecycle_manager_navigation/is_active` | `std_srvs/Trigger` | 客户端，1 Hz轮询 | 得到`navigation_available` |
+| `/competition/state`、`/competition/estop` | 共享接口 | 订阅，`control_state` QoS | 阶段、心跳、急停 |
+| `odom`、`scan`、`amcl_pose`、`collision_monitor_state` | 标准消息 | 订阅 | 速度/停车确认、传感器健康、定位协方差、受阻判断 |
+| TF `map -> robot_N/base_footprint` | — | 查询 | 机器人位姿 |
+
+### 3.2 execute_navigation_goal
+
+- **同一时刻只允许一个活动目标**，有活动目标时新目标直接拒绝。
+- **接受条件**：已收到`CompetitionState`；`run_id`、`map_id`、`map_revision`一致；阶段为TASK1/TASK2A/TASK2B、无急停、边缘心跳未超时；已定位；Nav2为active；目标在`map`坐标系中。
+- **执行**：调用Nav2 `navigate_to_pose`；成功后用当前位姿检查该目标自己的容差（`xy_tolerance_m`为0时用0.10 m；`yaw_tolerance_rad`为0时不检查朝向）。不满足时再发一次做精确逼近，仍不满足返回FAILED。Nav2自身的目标容差为0.05 m，必须小于任何请求的容差。
+- **结束**：取消Nav2（如仍在运行），等待里程计|v| ≤ 0.01 m/s且|ω| ≤ 0.02 rad/s，最长`safe_stop_ack`（2 s）；超时仍返回结果，并在状态中报告`CODE_COMMAND_TIMEOUT`。
+
+| 情况 | `terminal_state` | `reason.code` |
+|---|---|---|
+| 到达且满足容差 | SUCCEEDED | `NONE` |
+| Nav2中止，错误码104～106（无进展、控制器超时、无可行控制） | BLOCKED | `NAVIGATION_FAILED`（detail含`blocked`） |
+| 碰撞监视器持续停车超过5 s | BLOCKED | 同上 |
+| Nav2中止，其他错误（规划失败等） | FAILED | `NAVIGATION_FAILED` |
+| 精确逼近后仍超出容差 | FAILED | `NAVIGATION_FAILED` |
+| 超过`timeout`（为0时用60 s） | FAILED | `NAVIGATION_TIMEOUT` |
+| 定位丢失 | FAILED | `LOCALIZATION_LOST` |
+| 调用方取消 | CANCELLED | `USER_REQUEST` |
+| 阶段切到非运动阶段 | CANCELLED | `PHASE_CHANGED` |
+| 急停（更新的`generation`） | CANCELLED | `SAFETY_STOP` |
+
+代理不会自动重试失败的探索目标（前沿黑名单属于P2）。
+
+### 3.3 RobotState
+
+| 字段 | 规则 |
+|---|---|
+| `pose` | TF `map -> robot_N/base_footprint`；`header.frame_id`恒为`map` |
+| `pose.covariance` | AMCL模式取`amcl_pose`；SLAM模式用固定方差`slam_pose_variance` |
+| `localized` | TF不超过`tf_stale_s`，且（AMCL模式）x、y标准差 ≤ 0.5 m、航向标准差 ≤ 0.6 rad |
+| `navigation_available` | Nav2生命周期管理器报告active |
+| `mode` | 优先级：ESTOP > SAFE（阶段不允许运动或边缘失联）> ERROR（FATAL故障）> HOLDING > EXPLORING（导航目标`purpose=EXPLORATION`）> NAVIGATING > STANDBY |
+| `faults` | `TF_STALE`、`LOCALIZATION_LOST`、`NAVIGATION_ABORTED`（Nav2未active）、`COMMAND_TIMEOUT`、`ESTOP_ACTIVE`、`EDGE_CONNECTION_LOST`、`SENSOR_UNAVAILABLE`（激光1 s无数据） |
+| `battery_percentage` | NaN（仿真） |
+
+`localized`的阈值是“仍处于定位状态”的判据，比重新定位收敛的判据（0.10 m，计划3-02）宽松。仿真实测：一次4.7 m的行驶中，AMCL报告的标准差从0.09 m涨到约0.31 m、航向约0.33 rad，而真实误差约0.1 m。
+
+### 3.4 参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `robot_id`、`run_mode`、`config_dir` | — | 同看门狗 |
+| `require_competition_state` | `true` | 只有development允许`false` |
+| `localization_mode` | `amcl` | `amcl`或`slam`；`robot_stack`按`nav_mode`设置 |
+| `localized_max_xy_std_m`、`localized_max_yaw_std_rad` | 0.5、0.6 | 见3.3节 |
+| `slam_pose_variance` | 0.0025 | SLAM模式下报告的位姿方差（待与P2确认） |
+| `tf_stale_s` | 0.5 | TF过期判定[s] |
+| `sensor_timeout_s` | 1.0 | 激光无数据判定[s] |
+| `default_xy_tolerance_m` | 0.10 | 目标未给容差时使用[m] |
+| `blocked_after_s` | 5.0 | 碰撞监视器持续停车多久判为受阻[s] |
+| `stop_linear_eps_mps`、`stop_angular_eps_radps` | 0.01、0.02 | 停稳判定 |
+
+超时（`navigation_default`、`safe_stop_ack`、`tf_lookup`、`edge_connection`）和频率读自`interface_runtime.yaml`。
+
+## 4. robot_stack.launch.py
 
 ```bash
 ros2 launch edgeai_robot_bringup robot_stack.launch.py robot_id:=robot_1 run_mode:=development
@@ -86,7 +157,7 @@ ros2 launch edgeai_robot_bringup robot_stack.launch.py robot_id:=robot_1 run_mod
 | `require_competition_state` | `true` | 见2.3节 |
 | `nav_mode` | `none` | `none`：只启动看门狗；`amcl`或`slam`：同时包含`edgeai_robot_navigation`的`nav_robot.launch.py`（AMCL模式下导航需在定位后激活，见该包README第2.2节） |
 
-## 4. sim_multi_robot.launch.py
+## 5. sim_multi_robot.launch.py
 
 ```bash
 export EDGEAI_CONFIG_DIR=$PWD/config      # start_sim.sh会自动设置
@@ -110,7 +181,7 @@ ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1,robot
 
 工作过程：读取`config/sim/robots.yaml`的出生位姿 → 包含一次`sim_world.launch.py` → 每台机器人包含`sim_robot.launch.py`和（`stack:=true`时）`robot_stack.launch.py`。`robots.yaml`中没有某台机器人的位姿时启动报错退出。每台机器人的话题和坐标系见`edgeai_robot_description`的README。
 
-## 5. 验证
+## 6. 验证
 
 ```bash
 pixi run test     # 或只测本包：colcon test --packages-select edgeai_robot_bringup
@@ -130,9 +201,26 @@ pixi run test     # 或只测本包：colcon test --packages-select edgeai_robot
 | 两种情况下`/robot_1/cmd_vel`的发布者 | 1个（看门狗） |
 | `run_mode:=competition` | 启动失败，提示`aruco.dictionary`等官方参数未设置 |
 
-## 6. 已知限制
+`test/test_robot_agent.py`覆盖：模式优先级、Nav2错误码映射、容差和协方差判定；以及使用模拟Nav2/TF/里程计/AMCL的行为测试：状态内容、导航成功与NAVIGATING模式、EXPLORING模式、各类拒绝（`run_id`、地图版本、未定位、Nav2未active、FROZEN）、Nav2错误105→BLOCKED和208→FAILED、精确逼近两次后仍超差→FAILED、取消、阶段变化、急停及旧`generation`被忽略、超时、停不下来时报告`COMMAND_TIMEOUT`、激光中断报告`SENSOR_UNAVAILABLE`。
+
+阶段2验收（2026-10-24，无界面Gazebo，robot_1 + 真实Nav2/AMCL，测试脚本扮演边缘节点发布比赛状态）：
+
+| 项目 | 结果 |
+|---|---|
+| 精确目标，容差0.08 m | SUCCEEDED；与Gazebo真实位置误差0.14 m（含AMCL定位误差） |
+| 不可达目标（障碍物内部） | FAILED，但等到60 s默认超时才返回（见已知限制） |
+| 行驶中取消 | CANCELLED（`USER_REQUEST`），返回时已停稳 |
+| 3 s超时 | FAILED（`NAVIGATION_TIMEOUT`），返回时已停稳 |
+| 行驶中切到FROZEN | CANCELLED（`PHASE_CHANGED`），0.30 s后停车 |
+| 行驶中边缘心跳中断 | 1.00 s后停车（等于失联判定时间），模式变为SAFE |
+| 全程`/robot_1/cmd_vel`发布者 | 1个（看门狗） |
+
+## 7. 已知限制
 
 - 目前只有仿真启动；实机启动等组织方技术教程后实现（P1计划阶段5）。
 - 机器人ID只能是`robot_1`～`robot_4`。
-- `robot_agent`尚未实现；P2、P4请先使用`edgeai_system_tests`中的`mock_robot_agent`。
+- `execute_rescue_task`尚未实现（计划3-04）；需要救援动作的P4开发请先使用`edgeai_system_tests`中的`mock_robot_agent`。
+- 不可达目标要等Nav2默认行为树的恢复重试（最多6次）耗尽或代理超时才失败，实测等满60 s。P2探索会遇到不可达前沿，需要减少重试的行为树或更短的探索超时，留到与P2联调时解决。
+- AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数（默认0.2）偏大，待阶段3调参。
+- 边缘失联时代理不主动取消目标：看门狗已在1 s内停车，Nav2随后会因无进展判为受阻。
 - 在P2的阶段管理器完成前，需要运动的开发测试只能用`run_mode:=development require_competition_state:=false`，或自行发布`/competition/state`。

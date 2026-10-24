@@ -15,8 +15,8 @@
 """
 Start the software stack of one robot in its namespace.
 
-The stack is the safety_watchdog (ADR-0003) and, with nav_mode:=amcl|slam,
-Nav2 from edgeai_robot_navigation; robot_agent will be added here.
+The stack is the safety_watchdog (ADR-0003), the robot_agent and, with
+nav_mode:=amcl|slam, Nav2 from edgeai_robot_navigation.
 Competition parameters are resolved per run_mode with edgeai_common and
 handed to the nodes as ROS parameters; a competition launch fails while
 required official values are still unset.
@@ -70,10 +70,25 @@ def _launch_setup(context, *args, **kwargs):
             'use_sim_time': use_sim_time,
         }],
     )
-    actions = [GroupAction([PushRosNamespace(robot_id), watchdog])]
     nav_mode = LaunchConfiguration('nav_mode').perform(context)
     if nav_mode not in ('none', 'amcl', 'slam'):
         raise RuntimeError(f'nav_mode must be none, amcl or slam, got {nav_mode!r}')
+    agent = Node(
+        package='edgeai_robot_bringup',
+        executable='robot_agent',
+        name='robot_agent',
+        output='screen',
+        parameters=[{
+            'robot_id': robot_id,
+            'run_mode': run_mode,
+            'config_dir': config_dir,
+            'require_competition_state': require_state,
+            # Without Nav2 there is no AMCL either; the agent then reports localized=false.
+            'localization_mode': 'slam' if nav_mode == 'slam' else 'amcl',
+            'use_sim_time': use_sim_time,
+        }],
+    )
+    actions = [GroupAction([PushRosNamespace(robot_id), watchdog, agent])]
     if nav_mode != 'none':
         actions.append(IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
