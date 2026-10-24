@@ -118,6 +118,7 @@ class FakeRobot(Node):
         self.error_code = 0
         self.arrival_offset = 0.0
         self.moving = False
+        self.force_moving = False       # odometry reports motion regardless of Nav2
         self.nav_active = True
         self.scan_enabled = True
         self.covariance = [0.0] * 36
@@ -170,7 +171,7 @@ class FakeRobot(Node):
         self.tf.sendTransform(t)
         odom = Odometry()
         odom.header.stamp = now
-        odom.twist.twist.linear.x = 0.1 if self.moving else 0.0
+        odom.twist.twist.linear.x = 0.1 if (self.moving or self.force_moving) else 0.0
         self.odom_pub.publish(odom)
         amcl = PoseWithCovarianceStamped()
         amcl.header.stamp, amcl.header.frame_id = now, 'map'
@@ -396,22 +397,15 @@ def test_no_standstill_raises_command_timeout_fault(harness_factory):
     h.robot.behaviour = 'hang'
     handle = h.send(1.0, 0.0)
     time.sleep(0.5)
-    stop_forcing = threading.Event()
-
-    def keep_moving():
-        # Odometry keeps reporting motion after the cancel: the agent must still
-        # return a result, but report that the robot did not stop.
-        while not stop_forcing.is_set():
-            h.robot.moving = True
-            time.sleep(0.02)
-
-    threading.Thread(target=keep_moving, daemon=True).start()
+    # Odometry keeps reporting motion after the cancel: the agent must still return a
+    # result, but report that the robot did not stop.
+    h.robot.force_moving = True
     handle.cancel_goal_async()
     outcome = h.result(handle, timeout=10.0)
     assert outcome.result.terminal_state == Result.TERMINAL_CANCELLED
     assert wait_for(lambda: any(f.code == SystemFault.CODE_COMMAND_TIMEOUT
                                 for f in h.states[-1].faults), 2.0)
-    stop_forcing.set()
+    h.robot.force_moving = False
 
 
 def test_missing_scan_reports_sensor_fault(harness_factory):
