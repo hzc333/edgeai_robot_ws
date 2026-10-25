@@ -302,6 +302,10 @@ class Localization(Node):
     def _check_request(self, request):
         if not self.require_state:
             return
+        # Right after start-up the latched CompetitionState may not have arrived yet.
+        end = time.monotonic() + 2.0
+        while self.competition is None and time.monotonic() < end:
+            time.sleep(0.05)
         if self.competition is None:
             raise _Failure(TaskReason.CONFIGURATION_INVALID, 'no CompetitionState received')
         if request.run_id != self.competition.run_id:

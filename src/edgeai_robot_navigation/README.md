@@ -69,7 +69,7 @@ ros2 service call /robot_1/relocalize edgeai_robot_interfaces/srv/Relocalize \
 
 ### 3.1 流程
 
-1. 检查`run_id`、`map_id`、`map_revision`与最新`CompetitionState`一致；同一时刻只处理一个请求。
+1. 检查`run_id`、`map_id`、`map_revision`与最新`CompetitionState`一致（刚启动时最多等2 s接收比赛状态）；同一时刻只处理一个请求。
 2. AMCL未激活时，通过`lifecycle_manager_localization/manage_nodes`启动。
 3. 按模式给AMCL初始条件：
 
@@ -186,3 +186,4 @@ gz service -s /world/empty/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boo
 - 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。
 - AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数偏大，待调参。
 - 参数只针对仿真；实机参数等实机接入时再定（计划阶段5）。
+- 在`ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`模式下运行两台以上的完整机器人软件栈时，Cyclone DDS会因参与者数量超过默认上限而报“Failed to find a free participant index”，后启动的节点创建失败。解决：设置`CYCLONEDDS_URI='<CycloneDDS><Domain><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex></Discovery></Domain></CycloneDDS>'`。项目默认的`SUBNET`模式不受影响。

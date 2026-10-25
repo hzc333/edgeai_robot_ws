@@ -31,7 +31,7 @@ from edgeai_robot_bringup.robot_agent import (
     select_mode,
     within_tolerance,
 )
-from edgeai_robot_interfaces.action import ExecuteNavigationGoal
+from edgeai_robot_interfaces.action import ExecuteNavigationGoal, ExecuteRescueTask
 from edgeai_robot_interfaces.msg import (
     CompetitionState,
     EmergencyStop,
@@ -56,6 +56,7 @@ from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
 
 Result = ExecuteNavigationGoal.Result
+RescueResult = ExecuteRescueTask.Result
 RUN_ID, MAP_ID = 'run-test', 'map-test'
 
 
@@ -199,6 +200,9 @@ class Harness:
         self.edge.create_subscription(RobotPhaseAck, '/robot_1/phase_ack', self.acks.append, 10)
         self.client = ActionClient(self.edge, ExecuteNavigationGoal,
                                    '/robot_1/execute_navigation_goal')
+        self.rescue_client = ActionClient(self.edge, ExecuteRescueTask,
+                                          '/robot_1/execute_rescue_task')
+        self.rescue_feedback = []
         self.phase, self.sequence = CompetitionState.PHASE_TASK2A, 1
         self.edge.create_timer(0.2, self.heartbeat)
         self.executor = MultiThreadedExecutor(num_threads=8)
@@ -206,6 +210,7 @@ class Harness:
             self.executor.add_node(node)
         threading.Thread(target=self.executor.spin, daemon=True).start()
         assert self.client.wait_for_server(timeout_sec=5.0)
+        assert self.rescue_client.wait_for_server(timeout_sec=5.0)
         assert wait_for(lambda: self.states and self.states[-1].localized and
                         self.states[-1].navigation_available, 10.0), 'agent never ready'
 
@@ -227,6 +232,20 @@ class Harness:
         for key, value in fields.items():
             setattr(goal, key, value)
         future = self.client.send_goal_async(goal)
+        assert wait_for(future.done, 5.0)
+        return future.result()
+
+    def send_rescue(self, x, y, tolerance=0.08, hold_timeout_s=0):
+        goal = ExecuteRescueTask.Goal(run_id=RUN_ID, task_id='task-1', target_id='T1',
+                                      map_id=MAP_ID, map_revision=1,
+                                      target_type=ExecuteRescueTask.Goal.TYPE_NORMAL,
+                                      arrival_xy_tolerance_m=tolerance,
+                                      hold_timeout=Duration(sec=hold_timeout_s))
+        goal.rescue_pose.header.frame_id = 'map'
+        goal.rescue_pose.pose.position.x, goal.rescue_pose.pose.position.y = x, y
+        goal.rescue_pose.pose.orientation.w = 1.0
+        future = self.rescue_client.send_goal_async(
+            goal, feedback_callback=lambda m: self.rescue_feedback.append(m.feedback))
         assert wait_for(future.done, 5.0)
         return future.result()
 
@@ -406,6 +425,71 @@ def test_no_standstill_raises_command_timeout_fault(harness_factory):
     assert wait_for(lambda: any(f.code == SystemFault.CODE_COMMAND_TIMEOUT
                                 for f in h.states[-1].faults), 2.0)
     h.robot.force_moving = False
+
+
+def holding(h):
+    return (h.states[-1].mode == RobotState.MODE_HOLDING and h.rescue_feedback and
+            h.rescue_feedback[-1].execution_state == ExecuteRescueTask.Feedback.STATE_HOLDING)
+
+
+def test_rescue_reaches_holds_and_is_released(harness_factory):
+    h = harness_factory()
+    handle = h.send_rescue(1.0, 0.5)
+    assert handle.accepted
+    assert wait_for(lambda: holding(h), 5.0)
+    assert h.states[-1].active_task_id == 'task-1'
+    time.sleep(1.0)
+    assert holding(h)          # the robot never completes a rescue by itself
+    handle.cancel_goal_async()
+    outcome = h.result(handle)
+    assert outcome.status == GoalStatus.STATUS_CANCELED
+    assert outcome.result.terminal_state == RescueResult.TERMINAL_CANCELLED
+    assert outcome.result.reason.code == TaskReason.RELEASED_BY_COORDINATOR
+    assert wait_for(lambda: h.states[-1].mode == RobotState.MODE_STANDBY, 2.0)
+
+
+def test_rescue_hold_timeout(harness_factory):
+    h = harness_factory()
+    outcome = h.result(h.send_rescue(1.0, 0.0, hold_timeout_s=1))
+    assert outcome.result.terminal_state == RescueResult.TERMINAL_HOLD_TIMEOUT
+    assert outcome.result.reason.code == TaskReason.HOLD_TIMEOUT
+
+
+def test_rescue_reapproaches_when_pushed_away(harness_factory):
+    h = harness_factory()
+    handle = h.send_rescue(1.0, 0.0)
+    assert wait_for(lambda: holding(h), 5.0)
+    h.robot.pose = [1.3, 0.0, 0.0]            # pushed 0.3 m away
+    assert wait_for(lambda: h.robot.nav_goals == 2, 3.0)
+    assert wait_for(lambda: holding(h) and h.robot.pose[0] == pytest.approx(1.0), 5.0)
+    handle.cancel_goal_async()
+    h.result(handle)
+
+
+def test_rescue_phase_change_while_holding(harness_factory):
+    h = harness_factory()
+    handle = h.send_rescue(1.0, 0.0)
+    assert wait_for(lambda: holding(h), 5.0)
+    h.set_phase(CompetitionState.PHASE_FROZEN)
+    outcome = h.result(handle)
+    assert outcome.result.terminal_state == RescueResult.TERMINAL_CANCELLED
+    assert outcome.result.reason.code == TaskReason.PHASE_CHANGED
+
+
+def test_rescue_rejects_non_positive_tolerance(harness_factory):
+    h = harness_factory()
+    assert not h.send_rescue(1.0, 0.0, tolerance=0.0).accepted
+
+
+def test_rescue_approach_failure_and_tolerance(harness_factory):
+    h = harness_factory()
+    h.robot.behaviour, h.robot.error_code = 'fail', 105
+    outcome = h.result(h.send_rescue(1.0, 0.0))
+    assert outcome.result.terminal_state == RescueResult.TERMINAL_BLOCKED
+    h.robot.behaviour, h.robot.arrival_offset = 'succeed', 0.3
+    outcome = h.result(h.send_rescue(1.0, 0.0))
+    assert outcome.result.terminal_state == RescueResult.TERMINAL_FAILED
+    assert 'arrival tolerance' in outcome.result.reason.detail
 
 
 def test_missing_scan_reports_sensor_fault(harness_factory):

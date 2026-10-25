@@ -16,7 +16,10 @@
 Robot agent: the robot's interface to the edge (P1 plan 2-10 .. 2-14).
 
 Publishes RobotState (10 Hz) and RobotPhaseAck (2 Hz) and serves
-execute_navigation_goal on top of Nav2's navigate_to_pose. The edge never
+execute_navigation_goal and execute_rescue_task (reach and hold, P1 plan 3-04)
+on top of Nav2's navigate_to_pose. The robot never times a dwell or decides
+that a rescue is complete: the edge rescue_verifier does, and the coordinator
+then cancels the action to release the robot. The edge never
 calls Nav2 directly. The agent never publishes velocities: it cancels Nav2
 and relies on safety_watchdog (ADR-0003) to output zero, then confirms the
 stop from odometry before returning a result.
@@ -33,7 +36,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from edgeai_common.config import load_runtime_contract
 from edgeai_common.frames import frame, validate_robot_id
 from edgeai_common.qos import qos_from_contract
-from edgeai_robot_interfaces.action import ExecuteNavigationGoal
+from edgeai_robot_interfaces.action import ExecuteNavigationGoal, ExecuteRescueTask
 from edgeai_robot_interfaces.msg import (
     CompetitionState,
     EmergencyStop,
@@ -61,6 +64,12 @@ from tf2_ros import Buffer, TransformException, TransformListener
 MOTION_PHASES = (CompetitionState.PHASE_TASK1, CompetitionState.PHASE_TASK2A,
                  CompetitionState.PHASE_TASK2B)
 NavResult = ExecuteNavigationGoal.Result
+RescueResult = ExecuteRescueTask.Result
+# Terminal states shared by both actions have the same values.
+assert (NavResult.TERMINAL_FAILED, NavResult.TERMINAL_CANCELLED, NavResult.TERMINAL_BLOCKED) == \
+    (RescueResult.TERMINAL_FAILED, RescueResult.TERMINAL_CANCELLED, RescueResult.TERMINAL_BLOCKED)
+# Hysteresis beyond the arrival tolerance before a holding robot re-approaches.
+REAPPROACH_MARGIN_M = 0.03
 
 # Nav2 error codes that mean the robot could not make progress along a valid path.
 BLOCKED_ERROR_CODES = (FollowPath.Result.PATIENCE_EXCEEDED,
@@ -203,6 +212,7 @@ class RobotAgent(Node):
         self.collision_stop_since = None
         self.command_timeout_fault = False
         self.relocalize_failed = False
+        self.holding = False
         self.started = time.monotonic()
         self.pose = None                 # (x, y, yaw, stamp_seconds)
         self.nav_distance_remaining = 0.0
@@ -222,6 +232,12 @@ class RobotAgent(Node):
                                  self._on_collision_state, 10, callback_group=group)
         self.create_subscription(DiagnosticArray, '/diagnostics', self._on_diagnostics, 10,
                                  callback_group=group)
+        self.rescue_server = ActionServer(
+            self, ExecuteRescueTask, 'execute_rescue_task',
+            execute_callback=self._execute_rescue,
+            goal_callback=self._accept_rescue,
+            cancel_callback=lambda _: CancelResponse.ACCEPT,
+            callback_group=group)
         robot_qos = qos_from_contract(contract, 'robot_state')
         self.state_pub = self.create_publisher(RobotState, 'state', robot_qos)
         self.ack_pub = self.create_publisher(RobotPhaseAck, 'phase_ack', robot_qos)
@@ -443,13 +459,13 @@ class RobotAgent(Node):
     def _on_nav_feedback(self, feedback_msg):
         self.nav_distance_remaining = feedback_msg.feedback.distance_remaining
 
-    def _follow(self, goal_handle, nav_handle, start, timeout):
+    def _follow(self, goal_handle, nav_handle, start, timeout, cancel_reason, feedback):
         """Wait for Nav2 while handling cancel, interrupts, timeout and blocking."""
         result_future = nav_handle.get_result_async()
         last_feedback = 0.0
         while not result_future.done():
             if goal_handle.is_cancel_requested:
-                raise _GoalEnd(NavResult.TERMINAL_CANCELLED, TaskReason.USER_REQUEST,
+                raise _GoalEnd(NavResult.TERMINAL_CANCELLED, cancel_reason(),
                                'cancel requested')
             with self.lock:
                 request = self.abort_request
@@ -469,12 +485,7 @@ class RobotAgent(Node):
                                'blocked: collision monitor stopped the robot')
             if elapsed - last_feedback >= 0.5:
                 last_feedback = elapsed
-                feedback = ExecuteNavigationGoal.Feedback()
-                feedback.execution_state = ExecuteNavigationGoal.Feedback.STATE_NAVIGATING
-                feedback.distance_remaining_m = float(self.nav_distance_remaining)
-                feedback.elapsed = DurationMsg(sec=int(elapsed),
-                                               nanosec=int((elapsed % 1.0) * 1e9))
-                goal_handle.publish_feedback(feedback)
+                feedback(elapsed)
             time.sleep(0.05)
         return result_future.result()
 
@@ -508,7 +519,10 @@ class RobotAgent(Node):
         try:
             for attempt in (1, 2):
                 nav_handle = self._send_to_nav2(goal.goal_pose)
-                outcome = self._follow(goal_handle, nav_handle, start, timeout)
+                outcome = self._follow(goal_handle, nav_handle, start, timeout,
+                                       lambda: TaskReason.USER_REQUEST,
+                                       lambda elapsed: self._navigation_feedback(goal_handle,
+                                                                                 elapsed))
                 nav_handle = None
                 if outcome.status != GoalStatus.STATUS_SUCCEEDED:
                     raise _GoalEnd(*map_nav2_failure(outcome.status, outcome.result.error_code,
@@ -521,17 +535,132 @@ class RobotAgent(Node):
             raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_FAILED,
                            'outside the requested tolerance after a precise approach')
         except _GoalEnd as end:
-            return self._finish(goal_handle, nav_handle, end)
+            result = NavResult()
+            result.success = end.terminal_state == NavResult.TERMINAL_SUCCEEDED
+            self._finish(goal_handle, nav_handle, end, result)
+            result.completed_at = self.get_clock().now().to_msg()
+            return self._complete(goal_handle, result, result.success, end)
 
-    def _finish(self, goal_handle, nav_handle, end):
+    def _navigation_feedback(self, goal_handle, elapsed):
+        feedback = ExecuteNavigationGoal.Feedback()
+        feedback.execution_state = ExecuteNavigationGoal.Feedback.STATE_NAVIGATING
+        feedback.distance_remaining_m = float(self.nav_distance_remaining)
+        feedback.elapsed = DurationMsg(sec=int(elapsed), nanosec=int((elapsed % 1.0) * 1e9))
+        goal_handle.publish_feedback(feedback)
+
+    # --------------------------------------------------------------- rescue
+    def _accept_rescue(self, goal):
+        with self.lock:
+            reason = self._rejection(goal.run_id, goal.map_id, goal.map_revision,
+                                     goal.rescue_pose.header.frame_id)
+            if reason is None and goal.arrival_xy_tolerance_m <= 0.0:
+                reason = 'arrival_xy_tolerance_m must be positive'
+            if reason is None:
+                self.active_goal = ('rescue', goal.task_id, None)
+                self.abort_request = None
+                self.holding = False
+                return GoalResponse.ACCEPT
+        self.get_logger().warn(f'rejected rescue task {goal.task_id}: {reason}')
+        return GoalResponse.REJECT
+
+    def _release_reason(self):
+        """Reason for a cancel of a rescue action (ROS 2 cancels carry no reason)."""
+        if self.estop_active:
+            return TaskReason.SAFETY_STOP
+        if self._motion_allowed():
+            return TaskReason.RELEASED_BY_COORDINATOR
+        return TaskReason.PHASE_CHANGED
+
+    def _distance_to(self, target):
+        if self.pose is None:
+            return float('inf')
+        return math.hypot(target[0] - self.pose[0], target[1] - self.pose[1])
+
+    def _rescue_feedback(self, goal_handle, state, target):
+        feedback = ExecuteRescueTask.Feedback()
+        feedback.execution_state = state
+        feedback.distance_to_rescue_pose_m = float(self._distance_to(target))
+        feedback.message = 'holding' if state == ExecuteRescueTask.Feedback.STATE_HOLDING \
+            else 'navigating'
+        goal_handle.publish_feedback(feedback)
+
+    def _approach(self, goal_handle, pose, target, tolerance):
+        """Navigate until within the arrival tolerance; position only (rule 3.3)."""
+        start = time.monotonic()
+        for attempt in (1, 2):
+            nav_handle = self._send_to_nav2(pose)
+            try:
+                outcome = self._follow(
+                    goal_handle, nav_handle, start, self.navigation_default_s,
+                    self._release_reason,
+                    lambda _elapsed: self._rescue_feedback(
+                        goal_handle, ExecuteRescueTask.Feedback.STATE_NAVIGATING, target))
+            except _GoalEnd:
+                self._cancel_nav2(nav_handle)
+                raise
+            if outcome.status != GoalStatus.STATUS_SUCCEEDED:
+                raise _GoalEnd(*map_nav2_failure(outcome.status, outcome.result.error_code,
+                                                 outcome.result.error_msg))
+            self._update_pose()
+            if self._distance_to(target) <= tolerance:
+                return attempt
+        raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_FAILED,
+                       'outside the arrival tolerance after a precise approach')
+
+    def _execute_rescue(self, goal_handle):
+        goal = goal_handle.request
+        tolerance = goal.arrival_xy_tolerance_m
+        hold_timeout = duration_seconds(goal.hold_timeout)
+        target = (goal.rescue_pose.pose.position.x, goal.rescue_pose.pose.position.y)
+        self.nav_distance_remaining = 0.0
+        first_arrival = None
+        try:
+            while True:
+                self._approach(goal_handle, goal.rescue_pose, target, tolerance)
+                first_arrival = first_arrival or time.monotonic()
+                self.holding = True
+                last_feedback = 0.0
+                while True:
+                    if goal_handle.is_cancel_requested:
+                        raise _GoalEnd(NavResult.TERMINAL_CANCELLED, self._release_reason(),
+                                       'released by the coordinator')
+                    with self.lock:
+                        request = self.abort_request
+                    if request is not None:
+                        raise _GoalEnd(NavResult.TERMINAL_CANCELLED, request[0], request[1])
+                    self._update_pose()
+                    if not self._localized():
+                        raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.LOCALIZATION_LOST,
+                                       'localization lost while holding')
+                    if hold_timeout > 0.0 and time.monotonic() - first_arrival >= hold_timeout:
+                        raise _GoalEnd(RescueResult.TERMINAL_HOLD_TIMEOUT,
+                                       TaskReason.HOLD_TIMEOUT, 'hold timeout')
+                    if self._distance_to(target) > tolerance + REAPPROACH_MARGIN_M and \
+                            self._motion_allowed():
+                        self.holding = False
+                        self.get_logger().info('pushed out of the rescue pose; re-approaching')
+                        break
+                    now = time.monotonic()
+                    if now - last_feedback >= 0.5:
+                        last_feedback = now
+                        self._rescue_feedback(goal_handle,
+                                              ExecuteRescueTask.Feedback.STATE_HOLDING, target)
+                    time.sleep(0.1)
+        except _GoalEnd as end:
+            result = RescueResult()
+            self._finish(goal_handle, None, end, result)
+            result.ended_at = self.get_clock().now().to_msg()
+            return self._complete(goal_handle, result, False, end)
+
+    # --------------------------------------------------------------- common
+    def _finish(self, goal_handle, nav_handle, end, result):
+        """Stop Nav2, confirm standstill and fill the fields both results share."""
         self._cancel_nav2(nav_handle)
         stopped = self._wait_stopped()
         self.command_timeout_fault = not stopped
         if not stopped:
             self.get_logger().error('robot did not stop within safe_stop_ack after the goal')
-        result = NavResult()
         result.terminal_state = end.terminal_state
-        result.success = end.terminal_state == NavResult.TERMINAL_SUCCEEDED
         result.reason = TaskReason(code=end.code, detail=end.detail)
         self._update_pose()
         result.final_pose.header.frame_id = 'map'
@@ -541,17 +670,20 @@ class RobotAgent(Node):
             result.final_pose.pose.position.x, result.final_pose.pose.position.y = x, y
             result.final_pose.pose.orientation.z = math.sin(yaw / 2.0)
             result.final_pose.pose.orientation.w = math.cos(yaw / 2.0)
-        result.completed_at = self.get_clock().now().to_msg()
+
+    def _complete(self, goal_handle, result, success, end):
+        """Release the goal slot and set the terminal state (rclpy sends `result` now)."""
         with self.lock:
             self.active_goal = None
             self.abort_request = None
+            self.holding = False
         if goal_handle.is_cancel_requested:
             goal_handle.canceled(result)
-        elif result.success:
+        elif success:
             goal_handle.succeed(result)
         else:
             goal_handle.abort(result)
-        self.get_logger().info(f'navigation goal ended: {end.detail}')
+        self.get_logger().info(f'goal ended: {end.detail}')
         return result
 
     # ------------------------------------------------------------- output
@@ -570,7 +702,7 @@ class RobotAgent(Node):
                 motion_allowed=self._motion_allowed(),
                 fatal_fault=any(f.severity == SystemFault.SEVERITY_FATAL for f in faults),
                 active_kind=active[0] if active else None,
-                holding=False,
+                holding=self.holding,
                 exploring=bool(active) and
                 active[2] == ExecuteNavigationGoal.Goal.PURPOSE_EXPLORATION))
             if self.pose is not None:
