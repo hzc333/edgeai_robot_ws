@@ -1,20 +1,34 @@
+# Copyright 2026 EdgeAI Robotics Challenge Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Standalone synthetic-image and pose-contract tests; run with unittest discovery."""
 
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from types import SimpleNamespace
 
 import cv2
-import numpy as np
 
 PACKAGE = Path(__file__).resolve().parents[1]
 ROOT = PACKAGE.parents[1]
 sys.path[:0] = [str(PACKAGE), str(ROOT / 'src' / 'edgeai_common')]
 
 from edgeai_target_perception.aruco_core import ArucoCore  # noqa: E402
+import numpy as np  # noqa: E402
 
 
 class ArucoCoreTests(unittest.TestCase):
@@ -65,8 +79,8 @@ class ArucoCoreTests(unittest.TestCase):
                         cv2.Rodrigues(np.array([tilt, -.15, .1]))[0]
                         @ np.diag([1., -1., -1.]))[0].reshape(3)
                     translation = np.array([.03, -.02, depth])
-                    results = self.core.detect(self.render(rotation=rotation,
-                                                          translation=translation), self.camera)
+                    results = self.core.detect(
+                        self.render(rotation=rotation, translation=translation), self.camera)
                     self.assertEqual(len(results), 1)
                     result = results[0]
                     self.assertTrue(result.valid)

@@ -1,31 +1,43 @@
-# P3 视觉感知：独立几何核心（Phase 2）
+# P3 视觉感知：单机器人目标检测（Phase 3）
 
 本目录实现相机光学坐标系下的 ArUco 检测/位姿估计、RGB-D 深度校验、
-反投影和刚体坐标变换，不依赖 ROS 2。尚未加入 ROS 包清单、节点、TF
-查询、融合或仿真资源。
+反投影和刚体坐标变换，以及单机器人 ROS 2 检测节点。节点只发布原始
+`TargetObservation`，不查询 TF、不做多机器人融合或生成救援区。
 
 ## 文件
 
 - `edgeai_target_perception/__init__.py`：独立算法包入口。
 - `edgeai_target_perception/aruco_core.py`：配置适配、ArUco 检测、IPPE 候选筛选、RGB-D 一致性和二义性诊断。
 - `edgeai_target_perception/geometry.py`：深度单位转换、带畸变的像素反投影、刚体变换及 M→T 转换。
-- `test/`：unittest 合成测试，不需要图片文件或 ROS。
+- `edgeai_target_perception/target_detector.py`：ROS 2 单机器人节点及观察消息转换。
+- `launch/target_detector.launch.py`：在 `robot_N` 命名空间启动节点。
+- `test/`：几何与 ROS 消息转换合成测试。
 
 ## 依赖与测试
 
-项目标准环境使用 OpenCV 4.12、NumPy、PyYAML。算法要求 `cv2.aruco.ArucoDetector`；
-配置入口复用已有 `edgeai_common.config`（该模块本身不导入 ROS）。
-测试使用 Python 标准库 unittest，不要求 pytest；缺少 PyYAML 时配置测试会明确跳过。
-本模块不安装依赖，也不更改项目 Pixi 配置。
+项目标准环境使用 OpenCV 4.12、NumPy、PyYAML、ROS 2 Jazzy 和 `cv_bridge`。
+算法要求 `cv2.aruco.ArucoDetector`；配置入口复用 `edgeai_common.config` 的统一解析，
+比赛模式继续执行 official 参数门禁。本包不引入新依赖、不更改 Pixi 配置或共享消息。
 
-从仓库根目录执行：
+从仓库根目录在现有 Pixi 环境构建并测试：
 
 ```bash
-python -B -m unittest discover -s src/edgeai_target_perception/test -v
+pixi run colcon build --packages-up-to edgeai_target_perception --symlink-install
+pixi run colcon test --packages-select edgeai_target_perception
 ```
 
-标准 Linux Pixi 环境可执行同一命令（前缀 `pixi run`）。Windows 可使用已有兼容依赖的
-Python，但最终验收应在项目锁定的 Linux Pixi OpenCV 4.12 环境复现。
+启动单机器人节点（topic 按 `robot_id` 解析为机器人前缀路径）：
+
+```bash
+ros2 launch edgeai_target_perception target_detector.launch.py \
+  robot_id:=robot_1 run_mode:=development use_depth:=false
+```
+
+输入为 `camera/image`、`camera/camera_info` 和可选的 `camera/depth_image`；
+输出为 `target_observations`，比赛状态从全局 `/competition/state` 读取。
+启用深度可设置 `use_depth:=true`。16UC1 深度按 ROS 约定解释为毫米，32FC1 按米解释；
+深度帧必须属于同一光学坐标系、尺寸匹配，时间戳差不得超过 `depth_sync_tolerance_s`
+（默认 0.05 秒）。深度暂缺或过期时以纯 PnP 继续，但歧义位姿不会发布。
 
 ## 使用
 
@@ -75,6 +87,13 @@ RGB-D 调用可传入 `depth_image`、`depth_scale_m` 和 `depth_tolerance_m`。
 `undistortPoints`。`RigidTransform` 提供右手刚体变换、逆和组合；组合 `A.compose(B)` 先应用
 B 再应用 A。`marker_to_target_pose` 按几何协议右乘固定 `R_M_T`，并保持 Marker 中心平移不变。
 
+ROS 节点验证图像和 CameraInfo 的 frame 为 `robot_N/camera_optical_frame`，拒绝无效标定、
+不匹配分辨率和不支持的图像编码。仅当 `/competition/state` 在 3 秒内更新、含非空 `run_id`，
+且处于 Task 1/Task 2A/Task 2B 非冻结、非急停阶段时发布。消息 Header 使用 RGB 图像的时间戳
+和光学 frame；位姿为 Marker→相机光学帧，四元数由 Rodrigues 旋转生成。
+未知 Marker ID、PnP 失败、深度不一致和二义性结果不发布。confidence 是由重投影 RMS 导出的
+启发式分数，不是校准概率；没有经过测量验证的协方差时，消息以高对角协方差表示不确定性。
+
 ## 验证范围与限制
 
 测试覆盖已知位姿合成图像、不同距离/倾角、轻微模糊、普通/协同/未知 ID、畸变参数、
@@ -85,6 +104,6 @@ B 再应用 A。`marker_to_target_pose` 按几何协议右乘固定 `R_M_T`，�
 平面 PnP 存在二义性，最小重投影误差不能保证真实解；二义性诊断不等于概率置信度，
 本阶段不输出未经标定的置信度或协方差。尚无真实相机数据集、遮挡/强模糊性能证明、
 时间同步或深度与图像配准验证。
-不修改现有 ROS 消息、Schema、配置或几何协议。
+本阶段不修改现有 ROS 消息、Schema、配置或几何协议。
 
 Phase 1 和 Phase 2 的合成单元测试应在项目 Linux Pixi 环境中运行；不增加依赖。

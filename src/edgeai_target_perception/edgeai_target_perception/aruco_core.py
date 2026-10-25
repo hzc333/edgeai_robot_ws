@@ -1,3 +1,17 @@
+# Copyright 2026 EdgeAI Robotics Challenge Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """ArUco observations in camera optical coordinates, per geometry contract v0.2."""
 
 from dataclasses import dataclass
@@ -33,7 +47,8 @@ class MarkerResult:
 
     @property
     def valid(self) -> bool:
-        return self.identity is not None and self.rvec is not None and self.rejection_reason is None
+        return (self.identity is not None and self.rvec is not None
+                and self.rejection_reason is None)
 
 
 @dataclass(frozen=True)
@@ -48,7 +63,8 @@ class PlanarPnpDiagnostics:
 
 
 class ArucoCore:
-    """Detect and estimate M-to-camera pose, without TF or target-axis conversion.
+    """
+    Detect and estimate M-to-camera pose, without TF or target-axis conversion.
 
     Images are uint8 grayscale or BGR (convert ROS RGB explicitly in a future
     adapter). Camera calibration must correspond to the supplied image size.
@@ -114,7 +130,8 @@ class ArucoCore:
 
     @classmethod
     def from_repository_config(cls, run_mode='development', config_dir=None, **kwargs):
-        """Load competition_parameters.yaml with the ROS-free edgeai_common resolver.
+        """
+        Load competition_parameters.yaml with the ROS-free edgeai_common resolver.
 
         Competition mode intentionally preserves its existing missing-official-
         parameter gate, including requirements outside perception.
@@ -171,7 +188,8 @@ class ArucoCore:
     def estimate_pose(self, marker_id, corners, camera_matrix, distortion=None, *,
                       depth_image=None, depth_scale_m=None,
                       depth_tolerance_m=0.05) -> MarkerResult:
-        """Solve both IPPE candidates; retain the positive-depth, lowest-RMS solution.
+        """
+        Solve both IPPE candidates; retain the positive-depth, lowest-RMS solution.
 
         RMS is sqrt(mean(sum((observed - projected)**2, axis=1))) in pixels.
         Unknown IDs are returned as rejected diagnostics without running PnP.
@@ -221,7 +239,8 @@ class ArucoCore:
             if np.any(camera_points[:, 2] <= 0):
                 continue
             projected, _ = cv2.projectPoints(objects, rotation, translation, matrix, coefficients)
-            error = float(np.sqrt(np.mean(np.sum((points - projected.reshape(4, 2)) ** 2, axis=1))))
+            residuals = points - projected.reshape(4, 2)
+            error = float(np.sqrt(np.mean(np.sum(residuals ** 2, axis=1))))
             if np.isfinite(error):
                 depth_error = (None if depth_m is None else self._depth_error(
                     objects, rotation, translation, matrix, coefficients, depth_m))
