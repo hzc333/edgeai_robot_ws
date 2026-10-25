@@ -1,12 +1,12 @@
 # edgeai_robot_navigation
 
-P1负责的导航包：每台机器人的Nav2和AMCL配置与启动，以及开发用的地图服务器。
+P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/robot_N/relocalize`服务的`localization`节点，以及开发用的地图服务器。
 
 | 项目 | 内容 |
 |---|---|
 | 负责人 | P1（hzc333） |
-| 已完成 | 单机器人和双机器人在已知地图上导航（2026-10-24仿真验证） |
-| 未实现 | `localization`节点和`/robot_N/relocalize`服务（P1计划3-02）；目前初始位姿需手动发布、导航需手动激活 |
+| 已完成 | 单机器人和双机器人在已知地图上导航（2026-10-24）；`localization`节点和`relocalize`服务（计划3-02，2026-10-25仿真验收） |
+| 未完成 | 不移动时的全局定位基本无法收敛（如实报告失败）；SLAM到AMCL交接（计划3-03）待与P2联调 |
 
 ## 1. 文件清单
 
@@ -15,7 +15,9 @@ P1负责的导航包：每台机器人的Nav2和AMCL配置与启动，以及开�
 | `config/nav2_sim.yaml` | 一台机器人的Nav2和AMCL参数模板，含占位符`<ROBOT>`、`<MAX_LINEAR>`、`<MAX_ANGULAR>` |
 | `launch/nav_robot.launch.py` | 在`/robot_N`命名空间启动Nav2（可选AMCL），生成该机器人的参数文件 |
 | `launch/dev_map_server.launch.py` | **仅开发**：在全局`/map`上发布已保存的地图。比赛中`/map`由P2的`map_manager`提供 |
-| `edgeai_robot_navigation/__init__.py` | Python包入口，目前没有节点 |
+| `edgeai_robot_navigation/localization.py` | `localization`节点，入口`ros2 run edgeai_robot_navigation localization`，见第3节 |
+| `edgeai_robot_navigation/__init__.py` | Python包入口 |
+| `test/test_localization.py` | `localization`测试：收敛判定、激光与地图匹配度计算，以及使用模拟AMCL和生命周期管理器的服务行为测试 |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
 | `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置；`launch/*.py`和`config/*.yaml`安装到包共享目录 |
 
@@ -36,11 +38,12 @@ ros2 launch edgeai_robot_navigation nav_robot.launch.py robot_id:=robot_1 mode:=
 | `use_sim_time` | `true` | 实机设为`false` |
 | `params_file` | 包内`config/nav2_sim.yaml` | 参数模板 |
 | `autostart_navigation` | `auto` | `auto`：`slam`模式自动激活，`amcl`模式**不自动激活**（见2.2节）；也可设为`true`/`false` |
-| `autostart_localization` | `true` | 立即激活AMCL；`localization`节点完成后改为由它管理 |
+| `autostart_localization` | `false` | `false`：AMCL由`localization`节点在第一次`relocalize`时启动 |
+| `require_competition_state` | `true` | 传给`localization`节点；只有development允许`false`（不检查`run_id`和地图版本） |
 
 ### 2.1 启动内容
 
-在`/robot_N`命名空间中启动：`controller_server`、`smoother_server`、`planner_server`、`behavior_server`、`velocity_smoother`、`collision_monitor`、`bt_navigator`和`lifecycle_manager_navigation`；`mode:=amcl`时另外启动`amcl`和`lifecycle_manager_localization`。
+在`/robot_N`命名空间中启动：`controller_server`、`smoother_server`、`planner_server`、`behavior_server`、`velocity_smoother`、`collision_monitor`、`bt_navigator`和`lifecycle_manager_navigation`；`mode:=amcl`时另外启动`amcl`、`lifecycle_manager_localization`和`localization`（起点位姿取自解析后的`localization.start_poses`）。
 
 关键约定：
 
@@ -51,20 +54,56 @@ ros2 launch edgeai_robot_navigation nav_robot.launch.py robot_id:=robot_1 mode:=
 
 ### 2.2 启动顺序：先定位，再激活导航
 
-Nav2激活时，代价地图必须拿到`map -> robot_N/base_footprint`。拿不到时会在超时后失败，生命周期管理器会**永久放弃**启动。AMCL模式下，这个变换要等机器人收到初始位姿后才有，所以默认不自动激活导航。正确顺序：
+Nav2激活时，代价地图必须拿到`map -> robot_N/base_footprint`，拿不到会超时失败，生命周期管理器会**永久放弃**启动。AMCL模式下这个变换要等机器人被定位后才有，所以AMCL和导航都不自动激活，而是由`localization`节点在第一次`relocalize`成功后依次启动：
 
 ```bash
-# 1. 设置初始位姿（以后由relocalize服务完成）
-ros2 topic pub --once /robot_1/initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
-  "{header: {frame_id: map}, pose: {pose: {orientation: {w: 1.0}}, covariance: [0.01,0,0,0,0,0, 0,0.01,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.01]}}"
-# 2. 激活导航
-ros2 service call /robot_1/lifecycle_manager_navigation/manage_nodes \
-  nav2_msgs/srv/ManageLifecycleNodes "{command: 0}"
+ros2 service call /robot_1/relocalize edgeai_robot_interfaces/srv/Relocalize \
+  "{run_id: run-sim, map_id: map-sim, map_revision: 1, mode: 2, start_pose_id: task1_start}"
 ```
 
-计划3-02的`localization`节点会在`relocalize`成功后自动执行第2步。
+`run_id`和地图版本必须与当前`/competition/state`一致；`require_competition_state:=false`（仅开发）时不检查。
 
-## 3. 主要参数（`config/nav2_sim.yaml`）
+## 3. localization节点与relocalize服务
+
+提供`/robot_N/relocalize`（`Relocalize`服务，计划3-02），管理本机器人AMCL的生命周期，并在第一次成功后启动导航。调用方应为P2的`system_manager`；**是否允许操作员给位姿提示由调用方检查，本节点不检查**。
+
+### 3.1 流程
+
+1. 检查`run_id`、`map_id`、`map_revision`与最新`CompetitionState`一致；同一时刻只处理一个请求。
+2. AMCL未激活时，通过`lifecycle_manager_localization/manage_nodes`启动。
+3. 按模式给AMCL初始条件：
+
+| 模式 | 做法 |
+|---|---|
+| `MODE_KNOWN_START_POSE`（2） | 从`localization.start_poses[start_pose_id]`取位姿，以默认协方差（标准差0.10 m / 0.10 rad）发布到`initialpose`，再调用10次`request_nomotion_update`。**前提**：`map`坐标系与场地坐标系一致 |
+| `MODE_POSE_HINT`（3） | 使用请求中的`pose_hint`（必须在`map`中）；协方差全为0时用默认值；再调用10次`request_nomotion_update` |
+| `MODE_GLOBAL`（1） | 调用`reinitialize_global_localization`，再调用30次`request_nomotion_update`；机器人不移动 |
+
+4. 等待`amcl_pose`的x、y标准差 ≤ 0.10 m且航向标准差 ≤ 0.10 rad，并**连续保持1 s**。
+5. **激光与地图匹配度检查**：用估计位姿把当前激光的有效落点（6 m以内）投到`/map`，统计落在占据栅格2格（0.1 m）以内的比例，低于0.6则失败。原因：给错提示时，AMCL可能在错误位置收敛且协方差很小，只看协方差无法发现。
+6. 成功后，若导航未激活则通过`lifecycle_manager_navigation/manage_nodes`启动。
+7. 失败返回`success=false`、`reason.code=RELOCALIZATION_FAILED`（104）或`CONFIGURATION_INVALID`（901），**绝不在未收敛或不匹配时报告成功**。
+
+每次结果都发布到`/diagnostics`（状态名`robot_N/localization`，失败为ERROR，并以1 Hz重发）；`robot_agent`据此在`RobotState.faults`中报告`CODE_RELOCALIZATION_FAILED`（107）。
+
+### 3.2 参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `robot_id`、`run_mode`、`config_dir`、`require_competition_state` | — | 同其他节点 |
+| `start_poses_yaml` | `{}` | 起点表（YAML），由启动文件从解析后的参数填入 |
+| `convergence_max_xy_std_m`、`convergence_max_yaw_std_rad` | 0.10、0.10 | 收敛判据 |
+| `convergence_hold_s` | 1.0 | 收敛需连续保持的时间[s] |
+| `default_hint_xy_std_m`、`default_hint_yaw_std_rad` | 0.10、0.10 | 起点或提示未给协方差时使用 |
+| `hint_nomotion_updates`、`global_nomotion_updates` | 10、30 | 原地更新次数 |
+| `nomotion_update_rate_hz` | 5.0 | 原地更新频率 |
+| `scan_match_min_ratio` | 0.6 | 匹配度下限 |
+| `scan_match_radius_cells`、`scan_match_max_range_m` | 2、6.0 | 匹配半径（格）和使用的最大距离[m] |
+| `activate_navigation` | `true` | 成功后启动导航 |
+
+请求的`timeout`为0时，使用`interface_runtime.yaml`的`timeouts_s.relocalize_default`（30 s）。
+
+## 4. 主要参数（`config/nav2_sim.yaml`）
 
 以Pixi环境中Nav2 1.3.10的默认参数为基础，只保留本项目用到的节点。
 
@@ -89,32 +128,39 @@ ros2 service call /robot_1/lifecycle_manager_navigation/manage_nodes \
 | | 减速区 | 足迹外扩0.20 m，速度减半 | |
 | `amcl` | 帧和话题 | `map`、`robot_N/odom`、`robot_N/base_footprint`、`/robot_N/scan`、`/map` | |
 | | 粒子数 / 激光量程 | 500～2000 / 0.15～12 m | |
-| | `set_initial_pose` | `false` | 初始位姿只通过`initialpose`（以后是`relocalize`）给出 |
+| | `set_initial_pose` | `false` | 初始位姿只通过`relocalize`给出 |
 
-## 4. dev_map_server.launch.py
+## 5. dev_map_server.launch.py
 
 ```bash
 ros2 launch edgeai_robot_navigation dev_map_server.launch.py map:=/path/to/map.yaml
 ```
 
-默认地图是`edgeai_robot_description`的`maps/edgeai_arena.yaml`。这张地图的`map`坐标系原点在robot_1的出生点：世界坐标 = map坐标 + (-1.5, -1.5)，所以robot_1在map中的初始位姿是(0, 0, 0)，robot_2是(0, 0.7, 0)。
+默认地图是`edgeai_robot_description`的`maps/edgeai_arena_world.yaml`：图像与组织方的`edgeai_arena.yaml`相同，但原点平移后`map`坐标系与Gazebo世界坐标系重合，所以`gz model -m robot_N -p`的结果可以直接与地图坐标比较，场地坐标的起点位姿（如`task1_start` = (-1.5, -1.5, 0)）也可以直接使用。
 
-## 5. 验证
+## 6. 验证
 
 ```bash
-pixi run test      # 目前本包只有代码风格检查
+pixi run test      # 本包：localization测试和代码风格检查
 ```
 
-运行验证（无界面Gazebo，2026-10-24）：
+`test/test_localization.py`覆盖：收敛判定；激光与地图匹配度能区分正确与错误位姿；已知起点会启动AMCL和导航；未知起点被拒绝；位姿提示缺协方差时用默认值；提示不在`map`中被拒绝；全局定位；不收敛时失败并在`/diagnostics`报告ERROR；激光与地图不匹配时失败；成功后失败再成功节点仍存活；`run_id`和地图版本不一致时被拒绝。
+
+运行验证（无界面Gazebo）：
 
 ```bash
 ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py robots:=robot_1 headless:=true \
   require_competition_state:=false nav_mode:=amcl
 ros2 launch edgeai_robot_navigation dev_map_server.launch.py
-# 按2.2节设置初始位姿并激活导航，然后用NavigateToPose动作发送目标：
+ros2 service call /robot_1/relocalize edgeai_robot_interfaces/srv/Relocalize "{mode: 2, start_pose_id: task1_start}"
 ros2 action send_goal /robot_1/navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "{pose: {header: {frame_id: map}, pose: {position: {x: 3.3, y: 3.3}, orientation: {w: 1.0}}}}"
+  "{pose: {header: {frame_id: map}, pose: {position: {x: 1.8, y: 1.8}, orientation: {w: 1.0}}}}"
+# 移动机器人后测试重新定位：
+gz service -s /world/empty/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 2000 \
+  --req 'name: "robot_1", position: {x: 1.0, y: -0.5, z: 0.01}'
 ```
+
+导航（2026-10-24，当时目标容差0.10 m、地图为旧坐标系版本）：
 
 | 测试 | 结果 |
 |---|---|
@@ -122,13 +168,21 @@ ros2 action send_goal /robot_1/navigate_to_pose nav2_msgs/action/NavigateToPose 
 | 两台机器人同时导航到不同角落 | 两台都成功，误差约0.10 m，共69 s |
 | 测试前后`/robot_N/cmd_vel`的发布者 | 始终只有1个（看门狗） |
 
-最终误差包括目标检查器允许的0.10 m和AMCL定位误差。
+重新定位（2026-10-25，`require_competition_state:=true`，测试脚本发布比赛状态）：
 
-## 6. 已知限制
+| 测试 | 结果 |
+|---|---|
+| 启动后 | `localized=false`，导航未激活 |
+| 已知起点`task1_start` | 成功，约6 s，位置误差0.02 m、航向误差0.003 rad，匹配度1.00；导航自动激活，代理报告已定位 |
+| 瞬移到3个新位置后，用偏差约0.14 m的位姿提示 | 全部成功，约4 s，位置误差0.04～0.09 m，匹配度0.89～1.00 |
+| 瞬移后给出偏差1.0 m的错误提示 | 失败（AMCL不收敛，`RELOCALIZATION_FAILED`），代理报告`CODE_RELOCALIZATION_FAILED` |
+| 瞬移后不移动的全局定位 | 失败（不收敛），没有谎报成功 |
 
-- `relocalize`服务和`localization`节点尚未实现：初始位姿要手动发布，AMCL模式下导航要手动激活（2.2节）。
-- 两台机器人交会时，控制器出现过几次“controller patience exceeded”和“failed to make progress”，都由恢复行为自动处理，目标最终成功。双机器人协调和参数调整留到P1计划阶段3。
+## 7. 已知限制
+
+- **不移动时的全局定位基本无法收敛**，近似对称的场地还可能收敛到错误位置。比赛中应优先使用已知起点或位姿提示（需组织方确认是否提供起点位姿，见TBD登记表）。后续可在允许运动的阶段原地旋转辅助收敛。
+- 已知起点模式要求`map`坐标系与场地坐标系一致，需要P2在Task 1开始时用起点初始化SLAM。
+- 两台机器人交会时，控制器出现过几次“controller patience exceeded”和“failed to make progress”，都由恢复行为自动处理，目标最终成功。双机器人调参属于P1计划阶段3。
 - 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。
-- 上表10个目标的测试是在目标容差为0.10 m时做的；收紧到0.05 m后，通过`robot_agent`的精确目标测试成功（见bringup README）。
-- AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数偏大，待阶段3调参。
+- AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数偏大，待调参。
 - 参数只针对仿真；实机参数等实机接入时再定（计划阶段5）。

@@ -7,7 +7,7 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 | 负责人 | P1（hzc333） |
 | 已完成 | 多机器人仿真启动；`safety_watchdog`（ADR-0003）及其测试；`robot_stack.launch.py`（看门狗 + 可选Nav2），2026-10-24验证 |
 | 已完成 | `robot_agent`：RobotState、阶段确认、`execute_navigation_goal`，已接入`robot_stack.launch.py`并用真实Nav2完成阶段2仿真验收（2026-10-24） |
-| 未实现 | `execute_rescue_task`（计划3-04）、`relocalize`（计划3-02，在`edgeai_robot_navigation`中） |
+| 未实现 | `execute_rescue_task`（计划3-04） |
 | 未实现 | 实机启动 |
 
 ## 1. 文件清单
@@ -87,6 +87,7 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 | `lifecycle_manager_navigation/is_active` | `std_srvs/Trigger` | 客户端，1 Hz轮询 | 得到`navigation_available` |
 | `/competition/state`、`/competition/estop` | 共享接口 | 订阅，`control_state` QoS | 阶段、心跳、急停 |
 | `odom`、`scan`、`amcl_pose`、`collision_monitor_state` | 标准消息 | 订阅 | 速度/停车确认、传感器健康、定位协方差、受阻判断 |
+| `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | 订阅 | 读取`robot_N/localization`的最近一次重新定位结果 |
 | TF `map -> robot_N/base_footprint` | — | 查询 | 机器人位姿 |
 
 ### 3.2 execute_navigation_goal
@@ -120,7 +121,7 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 | `localized` | TF不超过`tf_stale_s`，且（AMCL模式）x、y标准差 ≤ 0.5 m、航向标准差 ≤ 0.6 rad |
 | `navigation_available` | Nav2生命周期管理器报告active |
 | `mode` | 优先级：ESTOP > SAFE（阶段不允许运动或边缘失联）> ERROR（FATAL故障）> HOLDING > EXPLORING（导航目标`purpose=EXPLORATION`）> NAVIGATING > STANDBY |
-| `faults` | `TF_STALE`、`LOCALIZATION_LOST`、`NAVIGATION_ABORTED`（Nav2未active）、`COMMAND_TIMEOUT`、`ESTOP_ACTIVE`、`EDGE_CONNECTION_LOST`、`SENSOR_UNAVAILABLE`（激光1 s无数据） |
+| `faults` | `TF_STALE`、`LOCALIZATION_LOST`、`NAVIGATION_ABORTED`（Nav2未active）、`COMMAND_TIMEOUT`、`RELOCALIZATION_FAILED`（`/diagnostics`中`robot_N/localization`为ERROR）、`ESTOP_ACTIVE`、`EDGE_CONNECTION_LOST`、`SENSOR_UNAVAILABLE`（激光1 s无数据） |
 | `battery_percentage` | NaN（仿真） |
 
 `localized`的阈值是“仍处于定位状态”的判据，比重新定位收敛的判据（0.10 m，计划3-02）宽松。仿真实测：一次4.7 m的行驶中，AMCL报告的标准差从0.09 m涨到约0.31 m、航向约0.33 rad，而真实误差约0.1 m。

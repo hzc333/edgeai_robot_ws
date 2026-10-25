@@ -16,7 +16,9 @@
 Serve a saved map on the global /map for development (not a competition launch).
 
 In competition runs /map comes from P2's map_manager. This launch only lets P1
-test localization and navigation before that exists.
+test localization and navigation before that exists. The default map's frame
+equals the Gazebo world frame, so Gazebo ground truth is directly in map
+coordinates.
 """
 
 import os
@@ -30,7 +32,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     default_map = os.path.join(get_package_share_directory('edgeai_robot_description'),
-                               'maps', 'edgeai_arena.yaml')
+                               'maps', 'edgeai_arena_world.yaml')
     use_sim_time = LaunchConfiguration('use_sim_time')
     return LaunchDescription([
         DeclareLaunchArgument('map', default_value=default_map, description='Map YAML file'),

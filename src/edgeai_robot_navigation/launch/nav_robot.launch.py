@@ -26,11 +26,11 @@ mode:=slam  no AMCL; SLAM provides map -> robot_N/odom (Task 1, P2)
 
 Nav2 can only activate once map -> robot_N/base_footprint exists; otherwise the
 costmaps time out and the lifecycle manager aborts the bring-up for good. In
-amcl mode the navigation nodes are therefore not started automatically by
-default: activate them after the robot is localized (the localization node of
-plan 3-02 will do this), e.g.
-  ros2 service call /robot_1/lifecycle_manager_navigation/manage_nodes \
-    nav2_msgs/srv/ManageLifecycleNodes "{command: 0}"
+amcl mode neither AMCL nor the navigation nodes start automatically: the
+localization node starts AMCL and then navigation on the first successful
+/<robot_id>/relocalize call, e.g.
+  ros2 service call /robot_1/relocalize edgeai_robot_interfaces/srv/Relocalize \
+    "{mode: 2, start_pose_id: task1_start}"
 """
 
 import os
@@ -79,6 +79,7 @@ def _launch_setup(context, *args, **kwargs):
     use_sim_time = _as_bool(LaunchConfiguration('use_sim_time').perform(context))
     autostart_localization = _as_bool(
         LaunchConfiguration('autostart_localization').perform(context))
+    require_state = _as_bool(LaunchConfiguration('require_competition_state').perform(context))
     autostart_navigation_text = LaunchConfiguration('autostart_navigation').perform(context)
     autostart_navigation = (mode == 'slam' if autostart_navigation_text == 'auto'
                             else _as_bool(autostart_navigation_text))
@@ -123,6 +124,16 @@ def _launch_setup(context, *args, **kwargs):
                  name='lifecycle_manager_localization', output='screen',
                  parameters=[common, {'autostart': autostart_localization,
                                       'node_names': ['amcl']}]),
+            Node(package='edgeai_robot_navigation', executable='localization',
+                 name='localization', output='screen',
+                 parameters=[common, {
+                     'robot_id': robot_id,
+                     'run_mode': run_mode,
+                     'config_dir': str(config_dir),
+                     'require_competition_state': require_state,
+                     'start_poses_yaml': yaml.safe_dump(
+                         resolved.get('localization.start_poses', {}) or {}),
+                 }]),
         ]
     return [GroupAction([PushRosNamespace(robot_id), *nodes])]
 
@@ -140,8 +151,11 @@ def generate_launch_description():
         DeclareLaunchArgument('autostart_navigation', default_value='auto',
                               description='auto: true for slam, false for amcl (activate '
                                           'after localization)'),
-        DeclareLaunchArgument('autostart_localization', default_value='true',
-                              description='Activate AMCL immediately (false once the '
-                                          'localization node manages it)'),
+        DeclareLaunchArgument('autostart_localization', default_value='false',
+                              description='Activate AMCL immediately instead of on the '
+                                          'first relocalize call'),
+        DeclareLaunchArgument('require_competition_state', default_value='true',
+                              description='false only in development: relocalize without '
+                                          'checking run_id and map version'),
         OpaqueFunction(function=_launch_setup),
     ])

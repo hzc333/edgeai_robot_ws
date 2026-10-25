@@ -1,0 +1,13 @@
+# Same image as edgeai_arena.yaml, with the origin shifted so that the map
+# frame coincides with the Gazebo world frame (arena centre at 0, 0).
+# edgeai_arena.yaml was built by SLAM starting at robot_1's spawn point
+# (-1.5, -1.5, yaw 0), so its map frame is the world frame offset by (-1.5, -1.5).
+# With this file, competition-style start poses given in arena coordinates
+# (localization.start_poses) can be used directly in the map frame.
+image: edgeai_arena.pgm
+mode: trinary
+resolution: 0.050
+origin: [-2.523, -2.530, 0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

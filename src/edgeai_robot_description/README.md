@@ -24,6 +24,7 @@
 | `rviz/multi_robot.rviz` | 多机器人RViz配置（robot_1、robot_2），固定坐标系`map`，需要SLAM或定位运行 |
 | `config/slam_toolbox.yaml` | SLAM Toolbox参数（**内容由P2负责**），当前为robot_1建图 |
 | `maps/edgeai_arena.yaml` + `.pgm` | 组织方提供的参考地图，101 × 101像素，0.05 m/像素，原点(-1.023, -1.030) |
+| `maps/edgeai_arena_world.yaml` | 同一张图像，原点平移为(-2.523, -2.530)，使`map`坐标系与Gazebo世界坐标系重合；`edgeai_robot_navigation`的开发地图服务器默认使用它 |
 | `CMakeLists.txt` | 把`launch`、`urdf`、`worlds`、`rviz`、`config`、`maps`安装到包共享目录 |
 | `package.xml` | 包信息和运行依赖 |
 

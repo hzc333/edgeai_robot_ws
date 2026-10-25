@@ -28,6 +28,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'localization = edgeai_robot_navigation.localization:main',
         ],
     },
 )

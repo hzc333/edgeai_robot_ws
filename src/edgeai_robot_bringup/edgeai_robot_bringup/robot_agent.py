@@ -29,6 +29,7 @@ import time
 
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration as DurationMsg
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from edgeai_common.config import load_runtime_contract
 from edgeai_common.frames import frame, validate_robot_id
 from edgeai_common.qos import qos_from_contract
@@ -201,6 +202,7 @@ class RobotAgent(Node):
         self.navigation_available = False
         self.collision_stop_since = None
         self.command_timeout_fault = False
+        self.relocalize_failed = False
         self.started = time.monotonic()
         self.pose = None                 # (x, y, yaw, stamp_seconds)
         self.nav_distance_remaining = 0.0
@@ -218,6 +220,8 @@ class RobotAgent(Node):
                                  callback_group=group)
         self.create_subscription(CollisionMonitorState, 'collision_monitor_state',
                                  self._on_collision_state, 10, callback_group=group)
+        self.create_subscription(DiagnosticArray, '/diagnostics', self._on_diagnostics, 10,
+                                 callback_group=group)
         robot_qos = qos_from_contract(contract, 'robot_state')
         self.state_pub = self.create_publisher(RobotState, 'state', robot_qos)
         self.ack_pub = self.create_publisher(RobotPhaseAck, 'phase_ack', robot_qos)
@@ -279,6 +283,11 @@ class RobotAgent(Node):
                 self.collision_stop_since = time.monotonic()
         else:
             self.collision_stop_since = None
+
+    def _on_diagnostics(self, msg):
+        for status in msg.status:
+            if status.name == f'{self.robot_id}/localization':
+                self.relocalize_failed = status.level == DiagnosticStatus.ERROR
 
     def _poll_navigation(self):
         if not self.nav_active_client.service_is_ready():
@@ -364,6 +373,9 @@ class RobotAgent(Node):
             faults.append(self._fault(SystemFault.CODE_COMMAND_TIMEOUT,
                                       SystemFault.SEVERITY_ERROR,
                                       'robot did not stop within safe_stop_ack'))
+        if self.relocalize_failed:
+            faults.append(self._fault(SystemFault.CODE_RELOCALIZATION_FAILED,
+                                      SystemFault.SEVERITY_ERROR, 'last relocalize failed'))
         if self.estop_active:
             faults.append(self._fault(SystemFault.CODE_ESTOP_ACTIVE, SystemFault.SEVERITY_WARN,
                                       'emergency stop active'))

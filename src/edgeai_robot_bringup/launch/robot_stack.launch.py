@@ -100,6 +100,7 @@ def _launch_setup(context, *args, **kwargs):
                 'run_mode': run_mode,
                 'config_dir': config_dir,
                 'use_sim_time': str(use_sim_time).lower(),
+                'require_competition_state': str(require_state).lower(),
             }.items(),
         ))
     return actions
