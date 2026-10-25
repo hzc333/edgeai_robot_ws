@@ -76,7 +76,10 @@ def _observation(stamp_ns, robot_id='robot_1', marker_id=1, target_id='T1',
     message.marker_pose.pose.position.x = .2
     message.marker_pose.pose.position.y = -.1
     message.marker_pose.pose.position.z = 1.0
-    message.marker_pose.pose.orientation.w = 1.0
+    message.marker_pose.pose.orientation.x = 0.5
+    message.marker_pose.pose.orientation.y = 0.5
+    message.marker_pose.pose.orientation.z = 0.5
+    message.marker_pose.pose.orientation.w = 0.5
     for index in (0, 7, 14, 21, 28, 35):
         message.marker_pose.covariance[index] = .02
     message.confidence = .9
@@ -133,6 +136,20 @@ class TargetFusionNodeTests(unittest.TestCase):
         self.assertEqual(target.observed_by, ['robot_1'])
         self.assertEqual(target.observation_count, 1)
         self.assertFalse(target.eligible_for_basic_rescue)
+        self.assertEqual(len(target.rescue_poses), 1)
+        self.assertAlmostEqual(target.rescue_poses[0].pose.position.x, .7)
+        self.assertAlmostEqual(target.rescue_poses[0].pose.position.y, -.1)
+        self.assertAlmostEqual(target.rescue_poses[0].pose.position.z, 0.)
+
+    def test_nonvertical_marker_is_rejected_before_registry_update(self):
+        message = _observation(self.node.get_clock().now().nanoseconds)
+        message.marker_pose.pose.orientation.x = 0.
+        message.marker_pose.pose.orientation.y = 0.
+        message.marker_pose.pose.orientation.z = 0.
+        message.marker_pose.pose.orientation.w = 1.
+        self.node._observation_callback(message, 'robot_1')
+        self.assertEqual(self.node.registry.snapshot(), ())
+        self.assertEqual(self.node.registry.revision, 0)
 
     def test_missing_timestamped_tf_is_retried_then_fused(self):
         self.buffer.fail = True

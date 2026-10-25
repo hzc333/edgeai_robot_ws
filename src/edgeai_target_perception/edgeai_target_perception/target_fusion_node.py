@@ -18,7 +18,12 @@ from collections import deque
 import math
 import time
 
-from edgeai_common.config import load_runtime_contract, resolve_parameters
+from edgeai_common.config import (
+    find_config_dir,
+    load_runtime_contract,
+    load_yaml,
+    resolve_parameters,
+)
 from edgeai_common.frames import frame, GLOBAL_FRAME, validate_robot_id
 from edgeai_common.qos import qos_from_contract
 from edgeai_robot_interfaces.msg import (
@@ -27,6 +32,7 @@ from edgeai_robot_interfaces.msg import (
     TargetArray,
     TargetObservation,
 )
+from geometry_msgs.msg import PoseStamped
 import numpy as np
 import rclpy
 from rclpy.duration import Duration
@@ -37,6 +43,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from .fusion_core import FusionObservation, TargetRegistry, transform_observation
 from .geometry import RigidTransform
+from .rescue_geometry import rescue_zone_poses, target_planar_pose, validate_development_geometry
 
 ACTIVE_PHASES = (CompetitionState.PHASE_TASK1, CompetitionState.PHASE_TASK2A,
                  CompetitionState.PHASE_TASK2B)
@@ -129,7 +136,7 @@ def transform_from_message(message):
     )
 
 
-def target_to_message(estimate, run_id, map_id, map_revision):
+def target_to_message(estimate, run_id, map_id, map_revision, rescue_geometry=None):
     """Convert a fused estimate to the unchanged shared Target interface."""
     target = Target()
     target.header.frame_id = GLOBAL_FRAME
@@ -142,10 +149,12 @@ def target_to_message(estimate, run_id, map_id, map_revision):
     target.marker_id = estimate.marker_id
     target.target_type = (Target.TYPE_NORMAL if estimate.target_type == 'normal'
                           else Target.TYPE_COOPERATIVE)
-    target.marker_pose.pose.position.x = float(estimate.position[0])
-    target.marker_pose.pose.position.y = float(estimate.position[1])
-    target.marker_pose.pose.position.z = float(estimate.position[2])
-    quaternion = _quaternion_from_rotation(estimate.rotation)
+    marker_pose = RigidTransform(estimate.rotation, estimate.position)
+    planar_pose, yaw = target_planar_pose(marker_pose)
+    target.marker_pose.pose.position.x = float(planar_pose.translation[0])
+    target.marker_pose.pose.position.y = float(planar_pose.translation[1])
+    target.marker_pose.pose.position.z = float(planar_pose.translation[2])
+    quaternion = _quaternion_from_rotation(planar_pose.rotation)
     (target.marker_pose.pose.orientation.x,
      target.marker_pose.pose.orientation.y,
      target.marker_pose.pose.orientation.z,
@@ -155,6 +164,17 @@ def target_to_message(estimate, run_id, map_id, map_revision):
     target.confidence = estimate.confidence
     target.observed_by = list(estimate.observed_by)
     target.eligible_for_basic_rescue = False
+    if rescue_geometry is not None:
+        for index, x, y, z, zone_yaw in rescue_zone_poses(
+                planar_pose, yaw, estimate.target_type, rescue_geometry):
+            rescue_pose = PoseStamped()
+            rescue_pose.header = target.header
+            rescue_pose.pose.position.x = x
+            rescue_pose.pose.position.y = y
+            rescue_pose.pose.position.z = z
+            rescue_pose.pose.orientation.z = math.sin(zone_yaw / 2)
+            rescue_pose.pose.orientation.w = math.cos(zone_yaw / 2)
+            target.rescue_poses.append(rescue_pose)
     return target
 
 
@@ -168,6 +188,17 @@ class TargetFusion(Node):
         self.declare_parameter('config_dir', '')
         config_dir = self.get_parameter('config_dir').value or None
         self.parameters = resolve_parameters(self.get_parameter('run_mode').value, config_dir)
+        self.run_mode = self.parameters.run_mode
+        self.rescue_geometry = None
+        geometry_version = self.parameters.get('rescue.geometry_version')
+        if geometry_version is not None:
+            if self.run_mode == 'competition':
+                raise ValueError(
+                    'official rescue geometry is not defined by the current project contract')
+            development_config = load_yaml(
+                find_config_dir(config_dir) / 'development_scenarios.yaml')
+            self.rescue_geometry = development_config.get('rescue_geometry')
+            validate_development_geometry(self.rescue_geometry, geometry_version)
         runtime = load_runtime_contract(config_dir)
         timeouts = runtime['timeouts_s']
         self.declare_parameter('robot_ids', 'robot_1,robot_2,robot_3,robot_4')
@@ -368,11 +399,14 @@ class TargetFusion(Node):
             observation = observation_from_message(message)
             mapped = transform_observation(
                 observation, transform_from_message(transform_message))
+            target_planar_pose(RigidTransform(mapped.rotation, mapped.position))
         except TransformException:
             return False
         except (ValueError, TypeError, np.linalg.LinAlgError) as error:
-            self._warn_throttled('invalid_observation',
-                                 f'ignoring invalid target observation: {error}')
+            reason = str(error)
+            self._warn_throttled(
+                'invalid_geometry' if reason == 'marker_not_vertical' else 'invalid_observation',
+                f'ignoring invalid target observation: {reason}')
             return True
         if self.registry.ingest(mapped, now_ns):
             self._publish_snapshot()
@@ -425,6 +459,10 @@ class TargetFusion(Node):
         array.task1_frozen = False
         array.targets = [
             target_to_message(estimate, state.run_id, state.map_id, state.map_revision)
+            if self.rescue_geometry is None
+            else target_to_message(
+                estimate, state.run_id, state.map_id, state.map_revision,
+                self.rescue_geometry)
             for estimate in self.registry.snapshot()
         ]
         self.publisher.publish(array)

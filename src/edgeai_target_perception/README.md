@@ -1,9 +1,10 @@
-# P3 视觉感知：目标检测与多机器人融合（Phase 1–4）
+# P3 视觉感知：目标检测、多机器人融合与 Task 1 目标导出（Phase 1–5）
 
 本目录实现相机光学坐标系下的 ArUco 检测/位姿估计、RGB-D 深度校验、
 反投影和刚体坐标变换，以及单机器人 ROS 2 检测节点。节点只发布原始
 `TargetObservation`；集中式融合节点按观测时间查询 TF，并发布 map 坐标系下的目标注册表。
-救援区生成和 Task 1 冻结/导出不在本阶段实现。
+Phase 5 增加开发模式救援区生成，以及供比赛控制层调用的 Task 1 不可变快照、
+Schema v2 校验和原子写出组件。竞赛规则未公布的官方救援几何不会被推测或替代。
 
 ## 文件
 
@@ -13,13 +14,15 @@
 - `edgeai_target_perception/target_detector.py`：ROS 2 单机器人节点及观察消息转换。
 - `edgeai_target_perception/fusion_core.py`：独立于 ROS 的身份校验、去重、离群拒绝和保守融合。
 - `edgeai_target_perception/target_fusion_node.py`：时间戳 TF 查询、比赛状态隔离和 `/edge/targets` 注册表发布。
+- `edgeai_target_perception/rescue_geometry.py`：Marker→目标平面位姿投影和版本化救援区计算。
+- `edgeai_target_perception/task1_export.py`：Finalize 请求版本匹配、运行内幂等快照、Schema v2 构造与原子文件写入。
 - `launch/target_detector.launch.py`：在 `robot_N` 命名空间启动节点。
 - `launch/target_fusion.launch.py`：启动边缘侧集中式多机器人融合节点。
 - `test/`：几何、融合算法和 ROS 消息适配合成测试。
 
 ## 依赖与测试
 
-项目标准环境使用 OpenCV 4.12、NumPy、PyYAML、ROS 2 Jazzy 和 `cv_bridge`。
+项目标准环境使用 OpenCV 4.12、NumPy、PyYAML、`jsonschema`、ROS 2 Jazzy 和 `cv_bridge`。
 算法要求 `cv2.aruco.ArucoDetector`；配置入口复用 `edgeai_common.config` 的统一解析，
 比赛模式继续执行 official 参数门禁。本包不引入新依赖、不更改 Pixi 配置或共享消息。
 
@@ -242,9 +245,51 @@ ros2 launch edgeai_target_perception target_fusion.launch.py \
 合并协方差保留输入不确定性并增加跨机器人位置散布，不因样本数而虚假缩小。目标身份映射
 保持稳定，`TargetArray.revision` 在注册表接受/删除样本时递增。每次 `run_id`、`map_id`、
 `map_revision` 或 `reset_count` 改变，以及 reset 开始或 ROS 时间倒退，都会清空注册表。
-观察过期时间、TF 查询时限及重试窗口来自 `config/interface_runtime.yaml`。未实现救援位姿、
-Task 1 冻结资格和导出，因此 `rescue_poses` 为空、`eligible_for_basic_rescue` 和
-`task1_frozen` 为 false。
+观察过期时间、TF 查询时限及重试窗口来自 `config/interface_runtime.yaml`。开发/演练模式下，
+融合节点使用版本匹配的救援几何发布 `rescue_poses`；官方规则缺失时不会生成救援区。在线
+`eligible_for_basic_rescue` 和 `TargetArray.task1_frozen` 在 P2 finalize 协调完成前保持 false；
+Task 1 导出快照只在冻结副本中将目标标记为 `eligible_for_basic_rescue=true`。
+
+## Phase 5：救援区、目标快照与 Schema v2 导出
+
+`target_fusion` 通过 `R_M_T` 将地图系 Marker 姿态转换成目标系，再按几何约定投影到
+`map` 平面；目标面法线接近竖直（相对竖直轴夹角小于 45°）时拒绝该观测并报告
+`marker_not_vertical`。开发/演练模式只有在已解析的 `rescue.geometry_version` 与
+`config/development_scenarios.yaml` 一致时才生成救援位姿：普通目标一个区，协同目标两个区，
+偏移量和顺序直接取配置。没有可用的带版本几何时不生成救援区。当前 `official` 救援几何为
+TBD；若将来比赛配置声明 official 几何，本节点会显式失败，而不是使用 development 规则冒充。
+
+`task1_export.py` 提供与 ROS 无关的 `Task1SnapshotFreezer`、`build_target_list` 和
+`write_target_list_atomic`。冻结函数要求 `CompetitionState`、Finalize 请求的 run/map 版本、
+`TargetArray` map/target revision 全部完全一致，且状态仍处于 Task 1、未冻结、未急停、未重置。
+同一 run 的重复请求返回首次保存的不可变序列化副本；同一 run 若 map 或 target revision 改变则
+报冲突，不会替换已冻结目标；新 run 可独立冻结。导出只接受与快照相同的地图元数据，目标按
+`target_id` 排序，观察机器人排序稳定，并以现有 `schemas/target_list.schema.json` Draft 2020-12
+Schema 和救援几何语义共同校验。写入使用同目录临时文件、`fsync` 和 `os.replace`，失败时保留
+已有目标文件。
+
+**Finalize 集成仍有 P2 前置阻塞，当前不能声称端到端冻结/导出已接通：**
+
+- `/edge/finalize_task1` 的接口明确要求同时协调 map snapshot、target list、Manifest 并整体原子化；
+  P2 对阶段控制、Manifest 和该服务拥有运行时权威。仓库当前没有该服务的 server，也没有地图
+  快照/元数据提供者；P3 不应另建同名服务或只写 targets.json 后错误返回整体 finalize 成功。
+- 当前 `target_fusion` 的 `TargetArray.revision` 是其本地 registry revision，`CompetitionState.target_revision`
+  由 P2 管理，但融合节点未同步或更新它。严格快照组件会拒绝两者不一致；需先由 P2/P3 确定
+  revision 单一权威及同步协议，并由 P2 在 finalize 操作中冻结/锁定一致快照，再传入地图元数据、
+  UTC 冻结时间和运行目录路径。服务所有权或 revision 对齐尚未确认前，不会更改 P2 生命周期状态。
+- 已冻结快照是不可变副本，不再依赖实时 TF 或融合 registry；但服务层需确保先完成该精确版本捕获，
+  再改变阶段/地图版本。上游融合继续按既有规则拒收过期观察及 run/map/reset 变更；它们不能改写
+  已捕获副本。当前 freezer 的幂等记录仅存在于进程内存；P2 服务必须在成功响应前持久化冻结副本/
+  Manifest，并在重启后从运行产物恢复同一结果。`CompetitionState`新鲜度也必须由服务/状态管理层
+  在冻结事务中确认。
+
+Phase 5 合成测试：
+
+```bash
+pixi run colcon build --packages-up-to edgeai_target_perception --symlink-install
+pixi run colcon test --packages-select edgeai_target_perception --event-handlers console_direct+
+pixi run colcon test-result --verbose
+```
 
 ### P2 地图/TF 前置条件与假设
 
