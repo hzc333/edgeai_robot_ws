@@ -3,7 +3,7 @@
 <package format="3">
   <name>edgeai_target_perception</name>
   <version>0.0.0</version>
-  <description>Single-robot ArUco target detector and RGB-D observation publisher.</description>
+  <description>ArUco target detection and timestamp-aware multi-robot target fusion.</description>
   <maintainer email="huangzc333@gmail.com">hzc333</maintainer>
   <license>Apache-2.0</license>
 
@@ -11,6 +11,8 @@
   <depend>edgeai_common</depend>
   <depend>edgeai_robot_interfaces</depend>
   <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
+  <test_depend>geometry_msgs</test_depend>
   <depend>cv_bridge</depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

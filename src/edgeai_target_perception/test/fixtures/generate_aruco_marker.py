@@ -7,6 +7,7 @@ import cv2
 
 
 def main():
+    """Generate the ArUco marker model and reference image."""
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     marker = cv2.aruco.generateImageMarker(dictionary, 1, 600, borderBits=1)
     image = cv2.copyMakeBorder(
@@ -29,27 +30,27 @@ def main():
                 x = (column - 2.5) * cell_size
                 y = (2.5 - row) * cell_size
                 black_tiles.append(
-                    f'''      <visual name="black_cell_{row}_{column}">
+                    f"""      <visual name="black_cell_{row}_{column}">
         <pose>{x:.8f} {y:.8f} 0.0005 0 0 0</pose>
         <geometry><box><size>{cell_size:.8f} {cell_size:.8f} 0.001</size></box></geometry>
         <material><ambient>0 0 0 1</ambient><diffuse>0 0 0 1</diffuse></material>
-      </visual>''')
+      </visual>""")
 
-    model_sdf = f'''<?xml version="1.0"?>
+    model_sdf = f"""<?xml version="1.0"?>
 <sdf version="1.9">
   <model name="aruco_marker_1">
     <static>true</static>
     <link name="marker">
       <visual name="white_backing">
         <pose>0 0 -0.0005 0 0 0</pose>
-        <geometry><box><size>0.2 0.2 0.001</size></box></geometry>
+        <geometry><box><size>0.15 0.15 0.001</size></box></geometry>
         <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
       </visual>
 {chr(10).join(black_tiles)}
     </link>
   </model>
 </sdf>
-'''
+"""
     model_path = model_dir / 'model.sdf'
     model_path.write_text(model_sdf, encoding='utf-8')
     print(f'Wrote DICT_4X4_50 marker ID 1: {model_path}; reference image: {texture_path}')

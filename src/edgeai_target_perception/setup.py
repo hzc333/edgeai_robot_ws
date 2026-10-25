@@ -34,11 +34,12 @@ setup(
     zip_safe=True,
     maintainer='hzc333',
     maintainer_email='huangzc333@gmail.com',
-    description='Single-robot ArUco target detector and RGB-D observation publisher',
+    description='ArUco perception and timestamp-aware multi-robot target fusion',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
             'target_detector = edgeai_target_perception.target_detector:main',
+            'target_fusion = edgeai_target_perception.target_fusion_node:main',
         ],
     },
 )
