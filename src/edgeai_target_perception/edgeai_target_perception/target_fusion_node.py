@@ -42,7 +42,7 @@ from rclpy.time import Time
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from .fusion_core import FusionObservation, TargetRegistry, transform_observation
-from .geometry import RigidTransform
+from .geometry import RigidTransform, R_M_T
 from .rescue_geometry import rescue_zone_poses, target_planar_pose, validate_development_geometry
 
 ACTIVE_PHASES = (CompetitionState.PHASE_TASK1, CompetitionState.PHASE_TASK2A,
@@ -136,6 +136,41 @@ def transform_from_message(message):
     )
 
 
+def _planar_pose_covariance(marker_rotation, covariance):
+    covariance = np.asarray(covariance, dtype=np.float64)
+    if (covariance.shape != (6, 6) or not np.isfinite(covariance).all()
+            or not np.allclose(covariance, covariance.T, atol=1e-8)):
+        raise ValueError('marker covariance must be finite and symmetric 6x6')
+
+    target_forward = marker_rotation @ R_M_T[:, 0]
+    horizontal_norm_squared = target_forward[0] ** 2 + target_forward[1] ** 2
+    if horizontal_norm_squared < 0.5:
+        raise ValueError('marker_not_vertical')
+
+    yaw_gradient = np.array([
+        -target_forward[1] / horizontal_norm_squared,
+        target_forward[0] / horizontal_norm_squared,
+        0.,
+    ])
+    skew_forward = np.array([
+        [0., -target_forward[2], target_forward[1]],
+        [target_forward[2], 0., -target_forward[0]],
+        [-target_forward[1], target_forward[0], 0.],
+    ])
+    jacobian = np.zeros((6, 6), dtype=np.float64)
+    jacobian[:3, :3] = np.eye(3)
+    jacobian[5, 3:] = yaw_gradient @ -skew_forward
+    result = jacobian @ covariance @ jacobian.T
+
+    # PnP covariance is currently an uncalibrated high-variance placeholder.
+    # Keep discarded roll/pitch uncertainty conservative after planar projection.
+    orientation_variance = max(
+        0., float(np.linalg.eigvalsh(covariance[3:, 3:]).max()))
+    result[3, 3] = orientation_variance
+    result[4, 4] = orientation_variance
+    return (result + result.T) / 2
+
+
 def target_to_message(estimate, run_id, map_id, map_revision, rescue_geometry=None):
     """Convert a fused estimate to the unchanged shared Target interface."""
     target = Target()
@@ -159,7 +194,8 @@ def target_to_message(estimate, run_id, map_id, map_revision, rescue_geometry=No
      target.marker_pose.pose.orientation.y,
      target.marker_pose.pose.orientation.z,
      target.marker_pose.pose.orientation.w) = map(float, quaternion)
-    target.marker_pose.covariance = estimate.covariance.reshape(-1).tolist()
+    target.marker_pose.covariance = _planar_pose_covariance(
+        estimate.rotation, estimate.covariance).reshape(-1).tolist()
     target.observation_count = estimate.observation_count
     target.confidence = estimate.confidence
     target.observed_by = list(estimate.observed_by)

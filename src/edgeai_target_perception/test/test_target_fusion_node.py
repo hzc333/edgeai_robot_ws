@@ -15,15 +15,27 @@
 """ROS adapter tests for timestamped TF lookup, state resets, and TargetArray output."""
 
 from pathlib import Path
+import math
 import sys
 import unittest
+
+import numpy as np
 
 PACKAGE = Path(__file__).resolve().parents[1]
 ROOT = PACKAGE.parents[1]
 sys.path[:0] = [str(PACKAGE), str(ROOT / 'src' / 'edgeai_common')]
 
 from edgeai_robot_interfaces.msg import CompetitionState, TargetObservation  # noqa: E402
-from edgeai_target_perception.target_fusion_node import TargetFusion  # noqa: E402
+from edgeai_target_perception.fusion_core import (  # noqa: E402
+    FusionObservation,
+    TargetRegistry,
+    transform_observation,
+)
+from edgeai_target_perception.geometry import RigidTransform  # noqa: E402
+from edgeai_target_perception.target_fusion_node import (  # noqa: E402
+    TargetFusion,
+    target_to_message,
+)
 from geometry_msgs.msg import TransformStamped  # noqa: E402
 import rclpy  # noqa: E402
 from tf2_ros import LookupException  # noqa: E402
@@ -140,6 +152,49 @@ class TargetFusionNodeTests(unittest.TestCase):
         self.assertAlmostEqual(target.rescue_poses[0].pose.position.x, .7)
         self.assertAlmostEqual(target.rescue_poses[0].pose.position.y, -.1)
         self.assertAlmostEqual(target.rescue_poses[0].pose.position.z, 0.)
+
+    def test_target_covariance_matches_map_frame_planar_pose(self):
+        marker_rotation = np.array([
+            [0., 0., 1.],
+            [0., 1., 0.],
+            [-1., 0., 0.],
+        ])
+        map_rotation = np.array([
+            [0., -1., 0.],
+            [1., 0., 0.],
+            [0., 0., 1.],
+        ])
+        source = FusionObservation(
+            stamp_ns=1_000_000_000,
+            robot_id='robot_1',
+            marker_id=1,
+            target_id='T1',
+            target_type='normal',
+            position=np.array([1., 2., 3.]),
+            rotation=marker_rotation,
+            covariance=np.diag([1., 2., 3., 4., 5., 6.]),
+            confidence=.9,
+        )
+        mapped = transform_observation(
+            source, RigidTransform(map_rotation, np.zeros(3)))
+        registry = TargetRegistry({1: {'target_id': 'T1', 'type': 'normal'}})
+        self.assertTrue(registry.ingest(mapped, mapped.stamp_ns))
+        estimate, = registry.snapshot()
+
+        target = target_to_message(estimate, 'run-a', 'map-a', 1)
+        covariance = np.asarray(target.marker_pose.covariance).reshape(6, 6)
+        self.assertAlmostEqual(
+            math.atan2(
+                2 * target.marker_pose.pose.orientation.w
+                * target.marker_pose.pose.orientation.z,
+                1 - 2 * target.marker_pose.pose.orientation.z ** 2,
+            ),
+            math.pi / 2,
+        )
+        np.testing.assert_allclose(
+            np.diag(covariance), [2., 1., 3., 6., 6., 6.], atol=1e-12)
+        np.testing.assert_allclose(covariance, covariance.T, atol=1e-12)
+        self.assertTrue(np.isfinite(covariance).all())
 
     def test_nonvertical_marker_is_rejected_before_registry_update(self):
         message = _observation(self.node.get_clock().now().nanoseconds)

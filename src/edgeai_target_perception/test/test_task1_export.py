@@ -65,6 +65,10 @@ MAP_METADATA = {
 
 def _target(target_id, marker_id, target_type):
     target = Target()
+    target.header.frame_id = 'map'
+    target.run_id = 'run-a'
+    target.map_id = 'map-a'
+    target.map_revision = 1
     target.target_id = target_id
     target.marker_id = marker_id
     target.target_type = (
@@ -165,6 +169,24 @@ class Task1ExportTests(unittest.TestCase):
                 _array(revision=3), _state(target_revision=3), run_id='run-a', map_id='map-a',
                 expected_map_revision=1, expected_target_revision=3, frozen_at=FROZEN_AT)
 
+    def test_freeze_rejects_embedded_target_metadata_mismatches(self):
+        mutations = {
+            'frame': lambda target: setattr(target.header, 'frame_id', 'odom'),
+            'run': lambda target: setattr(target, 'run_id', 'run-b'),
+            'map': lambda target: setattr(target, 'map_id', 'map-b'),
+            'map revision': lambda target: setattr(target, 'map_revision', 2),
+        }
+        for field, mutate in mutations.items():
+            with self.subTest(field=field):
+                target = _target('T1', 1, 'normal')
+                mutate(target)
+                with self.assertRaisesRegex(ValueError, 'metadata does not match'):
+                    Task1SnapshotFreezer().freeze(
+                        _array(targets=[target]), _state(),
+                        run_id='run-a', map_id='map-a',
+                        expected_map_revision=1, expected_target_revision=2,
+                        frozen_at=FROZEN_AT)
+
     def test_frozen_or_reset_competition_state_cannot_start_a_snapshot(self):
         state = _state()
         state.frozen = True
@@ -248,6 +270,15 @@ class Task1ExportTests(unittest.TestCase):
         )
         self.assertEqual(document['targets'], [])
         self.assertEqual(document['rescue_geometry'], {'version': None, 'source': None})
+
+    def test_empty_export_may_keep_nonzero_registry_revision(self):
+        document = build_target_list(
+            _snapshot(revision=3), MAP_METADATA,
+            rescue_geometry_source=None,
+            rescue_geometry_version=None,
+        )
+        self.assertEqual(document['targets'], [])
+        self.assertEqual(document['revision'], 3)
 
     def test_unknown_official_geometry_is_not_assumed(self):
         with self.assertRaisesRegex(ValueError, 'not defined'):

@@ -65,6 +65,7 @@ class Task1SnapshotFreezer:
     def freeze(self, target_array, competition_state, *, run_id, map_id,
                expected_map_revision, expected_target_revision, frozen_at):
         """Capture one exact run/map/target revision or reject inconsistent inputs."""
+        _validate_target_metadata(target_array, competition_state)
         key = (
             run_id, map_id, int(expected_map_revision), int(expected_target_revision))
         previous = self._snapshots.get(run_id)
@@ -108,6 +109,20 @@ class Task1SnapshotFreezer:
         )
         self._snapshots[run_id] = snapshot
         return snapshot
+
+
+def _validate_target_metadata(target_array, competition_state):
+    for target in target_array.targets:
+        if (target.header.frame_id != target_array.header.frame_id
+                or target.header.frame_id != 'map'
+                or target.run_id != target_array.run_id
+                or target.run_id != competition_state.run_id
+                or target.map_id != target_array.map_id
+                or target.map_id != competition_state.map_id
+                or target.map_revision != target_array.map_revision
+                or target.map_revision != competition_state.map_revision):
+            raise ValueError(
+                f'Target {target.target_id!r} metadata does not match its snapshot')
 
 
 def _valid_rfc3339(value):
