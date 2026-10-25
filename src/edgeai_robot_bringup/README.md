@@ -140,7 +140,7 @@ ROS 2动作被取消时无法携带原因，以上“被取消”的三种原因
 |---|---|
 | `pose` | TF `map -> robot_N/base_footprint`；`header.frame_id`恒为`map` |
 | `pose.covariance` | AMCL模式取`amcl_pose`；SLAM模式用固定方差`slam_pose_variance` |
-| `localized` | TF不超过`tf_stale_s`，且（AMCL模式）x、y标准差 ≤ 0.5 m、航向标准差 ≤ 0.6 rad |
+| `localized` | TF不超过`tf_stale_s`；收到过`amcl_pose`后（AMCL激活后，包括SLAM到AMCL交接之后）还要求x、y标准差 ≤ 0.5 m、航向标准差 ≤ 0.6 rad；之前在SLAM模式下只看TF |
 | `navigation_available` | Nav2生命周期管理器报告active |
 | `mode` | 优先级：ESTOP > SAFE（阶段不允许运动或边缘失联）> ERROR（FATAL故障）> HOLDING > EXPLORING（导航目标`purpose=EXPLORATION`）> NAVIGATING > STANDBY |
 | `faults` | `TF_STALE`、`LOCALIZATION_LOST`、`NAVIGATION_ABORTED`（Nav2未active）、`COMMAND_TIMEOUT`、`RELOCALIZATION_FAILED`（`/diagnostics`中`robot_N/localization`为ERROR）、`ESTOP_ACTIVE`、`EDGE_CONNECTION_LOST`、`SENSOR_UNAVAILABLE`（激光1 s无数据） |
@@ -154,7 +154,7 @@ ROS 2动作被取消时无法携带原因，以上“被取消”的三种原因
 |---|---|---|
 | `robot_id`、`run_mode`、`config_dir` | — | 同看门狗 |
 | `require_competition_state` | `true` | 只有development允许`false` |
-| `localization_mode` | `amcl` | `amcl`或`slam`；`robot_stack`按`nav_mode`设置 |
+| `localization_mode` | `amcl` | `amcl`或`slam`；`robot_stack`按`nav_mode`设置。只影响尚未收到`amcl_pose`时的判断 |
 | `localized_max_xy_std_m`、`localized_max_yaw_std_rad` | 0.5、0.6 | 见3.3节 |
 | `slam_pose_variance` | 0.0025 | SLAM模式下报告的位姿方差（待与P2确认） |
 | `tf_stale_s` | 0.5 | TF过期判定[s] |

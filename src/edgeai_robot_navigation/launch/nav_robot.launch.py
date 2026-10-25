@@ -22,7 +22,8 @@ robot_N/ frame prefixes (ADR-0002). Velocity flows controller -> cmd_vel_nav
 cmd_vel_safe_in -> safety_watchdog (ADR-0003).
 
 mode:=amcl  localize on the shared /map with AMCL (Task 2)
-mode:=slam  no AMCL; SLAM provides map -> robot_N/odom (Task 1, P2)
+mode:=slam  SLAM provides map -> robot_N/odom (Task 1, P2); AMCL and the
+            localization node are started inactive for the handover
 
 Nav2 can only activate once map -> robot_N/base_footprint exists; otherwise the
 costmaps time out and the lifecycle manager aborts the bring-up for good. In
@@ -80,6 +81,9 @@ def _launch_setup(context, *args, **kwargs):
     autostart_localization = _as_bool(
         LaunchConfiguration('autostart_localization').perform(context))
     require_state = _as_bool(LaunchConfiguration('require_competition_state').perform(context))
+    if mode == 'slam' and autostart_localization:
+        # Two map -> robot_N/odom publishers (SLAM and AMCL) are forbidden (ADR-0002).
+        raise RuntimeError('autostart_localization must be false in slam mode')
     autostart_navigation_text = LaunchConfiguration('autostart_navigation').perform(context)
     autostart_navigation = (mode == 'slam' if autostart_navigation_text == 'auto'
                             else _as_bool(autostart_navigation_text))
@@ -117,24 +121,25 @@ def _launch_setup(context, *args, **kwargs):
              parameters=[common, {'autostart': autostart_navigation,
                                   'node_names': NAVIGATION_NODES}]),
     ]
-    if mode == 'amcl':
-        nodes += [
-            nav2_node('nav2_amcl', 'amcl'),
-            Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
-                 name='lifecycle_manager_localization', output='screen',
-                 parameters=[common, {'autostart': autostart_localization,
-                                      'node_names': ['amcl']}]),
-            Node(package='edgeai_robot_navigation', executable='localization',
-                 name='localization', output='screen',
-                 parameters=[common, {
-                     'robot_id': robot_id,
-                     'run_mode': run_mode,
-                     'config_dir': str(config_dir),
-                     'require_competition_state': require_state,
-                     'start_poses_yaml': yaml.safe_dump(
-                         resolved.get('localization.start_poses', {}) or {}),
-                 }]),
-        ]
+    # AMCL and the localization node also run (inactive) in slam mode so that the
+    # SLAM -> AMCL handover (ADR-0002 appendix) is a single relocalize call.
+    nodes += [
+        nav2_node('nav2_amcl', 'amcl'),
+        Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
+             name='lifecycle_manager_localization', output='screen',
+             parameters=[common, {'autostart': autostart_localization,
+                                  'node_names': ['amcl']}]),
+        Node(package='edgeai_robot_navigation', executable='localization',
+             name='localization', output='screen',
+             parameters=[common, {
+                 'robot_id': robot_id,
+                 'run_mode': run_mode,
+                 'config_dir': str(config_dir),
+                 'require_competition_state': require_state,
+                 'start_poses_yaml': yaml.safe_dump(
+                     resolved.get('localization.start_poses', {}) or {}),
+             }]),
+    ]
     return [GroupAction([PushRosNamespace(robot_id), *nodes])]
 
 

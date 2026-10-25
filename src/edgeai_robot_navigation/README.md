@@ -6,7 +6,8 @@ P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/ro
 |---|---|
 | 负责人 | P1（hzc333） |
 | 已完成 | 单机器人和双机器人在已知地图上导航（2026-10-24）；`localization`节点和`relocalize`服务（计划3-02，2026-10-25仿真验收） |
-| 未完成 | 不移动时的全局定位基本无法收敛（如实报告失败）；SLAM到AMCL交接（计划3-03）待与P2联调 |
+| 已完成（续） | SLAM到AMCL交接的P1侧（计划3-03，2026-10-25仿真演练） |
+| 未完成 | 不移动时的全局定位基本无法收敛（如实报告失败）；交接需与P2的`map_manager`联调 |
 
 ## 1. 文件清单
 
@@ -32,18 +33,18 @@ ros2 launch edgeai_robot_navigation nav_robot.launch.py robot_id:=robot_1 mode:=
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `robot_id` | `robot_1` | 命名空间和帧前缀 |
-| `mode` | `amcl` | `amcl`：用AMCL在共享`/map`上定位（Task 2）；`slam`：不启动AMCL，由SLAM提供`map -> robot_N/odom`（Task 1） |
+| `mode` | `amcl` | `amcl`：用AMCL在共享`/map`上定位（Task 2）；`slam`：由SLAM提供`map -> robot_N/odom`（Task 1），导航自动激活，AMCL和`localization`节点同时启动但保持未激活，供交接使用 |
 | `run_mode` | `development` | 用于解析速度上限 |
 | `config_dir` | 搜索 | 仓库根目录`config/` |
 | `use_sim_time` | `true` | 实机设为`false` |
 | `params_file` | 包内`config/nav2_sim.yaml` | 参数模板 |
 | `autostart_navigation` | `auto` | `auto`：`slam`模式自动激活，`amcl`模式**不自动激活**（见2.2节）；也可设为`true`/`false` |
-| `autostart_localization` | `false` | `false`：AMCL由`localization`节点在第一次`relocalize`时启动 |
+| `autostart_localization` | `false` | `false`：AMCL由`localization`节点在第一次`relocalize`时启动。`slam`模式下设为`true`会导致SLAM和AMCL同时发布`map -> odom`，启动直接报错 |
 | `require_competition_state` | `true` | 传给`localization`节点；只有development允许`false`（不检查`run_id`和地图版本） |
 
 ### 2.1 启动内容
 
-在`/robot_N`命名空间中启动：`controller_server`、`smoother_server`、`planner_server`、`behavior_server`、`velocity_smoother`、`collision_monitor`、`bt_navigator`和`lifecycle_manager_navigation`；`mode:=amcl`时另外启动`amcl`、`lifecycle_manager_localization`和`localization`（起点位姿取自解析后的`localization.start_poses`）。
+在`/robot_N`命名空间中启动：`controller_server`、`smoother_server`、`planner_server`、`behavior_server`、`velocity_smoother`、`collision_monitor`、`bt_navigator`、`lifecycle_manager_navigation`、`amcl`、`lifecycle_manager_localization`和`localization`（起点位姿取自解析后的`localization.start_poses`）。两种模式下AMCL都在第一次`relocalize`时才激活。
 
 关键约定：
 
@@ -86,7 +87,17 @@ ros2 service call /robot_1/relocalize edgeai_robot_interfaces/srv/Relocalize \
 
 每次结果都发布到`/diagnostics`（状态名`robot_N/localization`，失败为ERROR，并以1 Hz重发）；`robot_agent`据此在`RobotState.faults`中报告`CODE_RELOCALIZATION_FAILED`（107）。
 
-### 3.2 参数
+### 3.2 SLAM到AMCL的交接（计划3-03）
+
+Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激活，AMCL未激活。交接时按ADR-0002附录的顺序：
+
+1. P2切到`HANDOVER`，看门狗让机器人停车。
+2. P2记录SLAM给出的最后位姿（`RobotState.pose`或TF `map -> robot_N/base_footprint`）。
+3. P2保存地图、停止SLAM，并由`map_manager`在`/map`上发布冻结地图。
+4. P2以`MODE_POSE_HINT`和第2步的位姿调用`/robot_N/relocalize`；本节点启动AMCL并确认收敛和匹配。
+5. 之后`map -> robot_N/odom`只由AMCL发布；`robot_agent`在收到`amcl_pose`后自动改用AMCL协方差判断是否定位。
+
+### 3.3 参数
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
@@ -178,10 +189,21 @@ gz service -s /world/empty/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boo
 | 瞬移后给出偏差1.0 m的错误提示 | 失败（AMCL不收敛，`RELOCALIZATION_FAILED`），代理报告`CODE_RELOCALIZATION_FAILED` |
 | 瞬移后不移动的全局定位 | 失败（不收敛），没有谎报成功 |
 
+SLAM到AMCL交接演练（2026-10-25，robot_1，测试脚本代行P2的SLAM启停和地图保存）：
+
+| 步骤 | 结果 |
+|---|---|
+| Task 1：`nav_mode:=slam` + SLAM Toolbox | 代理报告已定位、导航可用；2个探索目标都成功（真实误差约0.04 m） |
+| HANDOVER：记录SLAM位姿、保存地图、停止SLAM、发布冻结地图 | 机器人SAFE停车；确认`slam_toolbox`已不在运行 |
+| 用SLAM位姿调用`relocalize`（位姿提示） | 成功，3.4 s，匹配度0.99；**交接前后位姿跳变0.053 m**（P1计划验收标准为 < 0.05 m，略超） |
+| 交接后 | AMCL active，代理报告已定位、导航可用 |
+| TASK2A导航目标 | 成功，真实误差0.021 m |
+
 ## 7. 已知限制
 
 - **不移动时的全局定位基本无法收敛**，近似对称的场地还可能收敛到错误位置。比赛中应优先使用已知起点或位姿提示（需组织方确认是否提供起点位姿，见TBD登记表）。后续可在允许运动的阶段原地旋转辅助收敛。
 - 已知起点模式要求`map`坐标系与场地坐标系一致，需要P2在Task 1开始时用起点初始化SLAM。
+- 交接前后位姿跳变实测0.053 m，略超P1计划的0.05 m标准；需与P2联调时复测，必要时减小提示协方差或增加原地更新次数。
 - 两台机器人交会时，控制器出现过几次“controller patience exceeded”和“failed to make progress”，都由恢复行为自动处理，目标最终成功。双机器人调参属于P1计划阶段3。
 - 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。
 - AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数偏大，待调参。

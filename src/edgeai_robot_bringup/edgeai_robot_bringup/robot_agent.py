@@ -338,10 +338,11 @@ class RobotAgent(Node):
         return self.pose is not None and self._now_s() - self.pose[3] <= self.tf_stale_s
 
     def _localization_ok(self):
-        if self.localization_mode == 'slam':
-            return True
-        return self.amcl_covariance is not None and covariance_ok(
-            self.amcl_covariance, self.max_xy_std, self.max_yaw_std)
+        # AMCL publishes amcl_pose only while active. Once it does (always in amcl mode,
+        # after the SLAM -> AMCL handover in slam mode) its covariance decides.
+        if self.amcl_covariance is not None:
+            return covariance_ok(self.amcl_covariance, self.max_xy_std, self.max_yaw_std)
+        return self.localization_mode == 'slam'
 
     def _localized(self):
         return bool(self._tf_fresh() and self._localization_ok())
@@ -377,7 +378,7 @@ class RobotAgent(Node):
         if self.pose is not None and not self._tf_fresh():
             faults.append(self._fault(SystemFault.CODE_TF_STALE, SystemFault.SEVERITY_ERROR,
                                       'map -> base_footprint is stale'))
-        if self.localization_mode == 'amcl' and self.amcl_covariance is not None and \
+        if self.amcl_covariance is not None and \
                 not self._localization_ok():
             faults.append(self._fault(SystemFault.CODE_LOCALIZATION_LOST,
                                       SystemFault.SEVERITY_ERROR,
@@ -710,7 +711,7 @@ class RobotAgent(Node):
                 msg.pose.pose.position.x, msg.pose.pose.position.y = x, y
                 msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
                 msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
-            if self.localization_mode == 'amcl' and self.amcl_covariance is not None:
+            if self.amcl_covariance is not None:
                 msg.pose.covariance = self.amcl_covariance
             else:
                 msg.pose.covariance[0] = msg.pose.covariance[7] = self.slam_variance

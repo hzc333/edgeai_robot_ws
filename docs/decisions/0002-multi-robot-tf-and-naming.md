@@ -100,3 +100,5 @@
 4. P2以`MODE_POSE_HINT`和第2步的位姿调用`/robot_1/relocalize`（系统内部交接，不是操作员注入）。
 5. P1的`localization`节点启动AMCL并确认收敛后返回成功。
 6. 交接前后用`ros2 run tf2_ros tf2_monitor map robot_1/odom`确认只有一个发布者。
+
+P1侧实现（2026-10-25）：`nav_mode:=slam`时AMCL和`localization`节点已启动但未激活，第4步的一次`relocalize`调用即完成切换；`slam`模式下禁止自动激活AMCL。仿真演练中交接成功，位姿跳变0.053 m，交接后TASK2A导航正常（详见`src/edgeai_robot_navigation/README.md`）。P2侧的SLAM停止和冻结地图发布待联调。
