@@ -100,6 +100,7 @@ class FakeAmclStack(Node):
         self.global_inits = 0
         self.nomotion_calls = 0
         self.pose = None
+        self.initial_covariance = None
         self.pub = self.create_publisher(PoseWithCovarianceStamped, 'amcl_pose', 10)
         self.create_subscription(PoseWithCovarianceStamped, 'initialpose', self._on_initial, 10,
                                  callback_group=group)
@@ -154,6 +155,7 @@ class FakeAmclStack(Node):
 
     def _on_initial(self, msg):
         self.pose = (msg.pose.pose.position.x, msg.pose.pose.position.y)
+        self.initial_covariance = list(msg.pose.covariance)
 
     def _global(self, _request, response):
         self.global_inits += 1
@@ -201,8 +203,9 @@ class Harness:
         self.diagnostics = []
         self.edge.create_subscription(DiagnosticArray, '/diagnostics',
                                       lambda m: self.diagnostics.extend(m.status), 10)
+        self.phase = CompetitionState.PHASE_HANDOVER
         self.edge.create_timer(0.2, lambda: self.state_pub.publish(CompetitionState(
-            run_id=RUN_ID, map_id=MAP_ID, map_revision=1, phase=CompetitionState.PHASE_HANDOVER)))
+            run_id=RUN_ID, map_id=MAP_ID, map_revision=1, phase=self.phase)))
         self.client = self.edge.create_client(Relocalize, '/robot_1/relocalize')
         self.executor = MultiThreadedExecutor(num_threads=8)
         for node in (self.node, self.fake, self.edge):
@@ -257,14 +260,33 @@ def test_unknown_start_pose_is_rejected(harness):
     assert not harness.fake.nav_active
 
 
-def test_pose_hint_uses_default_covariance_when_missing(harness):
+def _hint(x, y):
     hint = PoseWithCovarianceStamped()
     hint.header.frame_id = 'map'
-    hint.pose.pose.position.x, hint.pose.pose.position.y = 1.0, 0.5
+    hint.pose.pose.position.x, hint.pose.pose.position.y = x, y
     hint.pose.pose.orientation.w = 1.0
-    response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=hint)
+    return hint
+
+
+def test_pose_hint_uses_default_covariance_when_missing(harness):
+    harness.phase = CompetitionState.PHASE_TASK2A
+    time.sleep(0.5)
+    response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=_hint(1.0, 0.5))
     assert response.success, response.message
     assert harness.fake.pose == (1.0, 0.5)
+    assert harness.fake.initial_covariance[0] == pytest.approx(0.10 ** 2)
+
+
+def test_pose_hint_during_handover_uses_tight_covariance(harness):
+    response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=_hint(1.0, 0.5))
+    assert response.success, response.message
+    assert harness.fake.initial_covariance[0] == pytest.approx(0.03 ** 2)
+    assert harness.fake.initial_covariance[35] == pytest.approx(0.03 ** 2)
+    hint = _hint(1.0, 0.5)                    # an explicit covariance is kept
+    hint.pose.covariance[0] = hint.pose.covariance[7] = hint.pose.covariance[35] = 0.0016
+    response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=hint)
+    assert response.success, response.message
+    assert harness.fake.initial_covariance[0] == pytest.approx(0.0016)
 
 
 def test_pose_hint_must_be_in_map(harness):

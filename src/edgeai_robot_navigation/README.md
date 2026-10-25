@@ -95,7 +95,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 1. P2切到`HANDOVER`，看门狗让机器人停车。
 2. P2记录SLAM给出的最后位姿（`RobotState.pose`或TF `map -> robot_N/base_footprint`）。
 3. P2保存地图、停止SLAM，并由`map_manager`在`/map`上发布冻结地图。
-4. P2以`MODE_POSE_HINT`和第2步的位姿调用`/robot_N/relocalize`；本节点启动AMCL并确认收敛和匹配。
+4. P2以`MODE_POSE_HINT`和第2步的位姿调用`/robot_N/relocalize`；本节点启动AMCL并确认收敛和匹配。提示可以不带协方差：`HANDOVER`阶段内本节点使用较紧的默认值（0.03 m / 0.03 rad）。若P2传入SLAM自己的协方差，则按传入值使用。
 5. 之后`map -> robot_N/odom`只由AMCL发布；`robot_agent`在收到`amcl_pose`后自动改用AMCL协方差判断是否定位。
 
 ### 3.3 参数
@@ -107,6 +107,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | `convergence_max_xy_std_m`、`convergence_max_yaw_std_rad` | 0.10、0.10 | 收敛判据 |
 | `convergence_hold_s` | 1.0 | 收敛需连续保持的时间[s] |
 | `default_hint_xy_std_m`、`default_hint_yaw_std_rad` | 0.10、0.10 | 起点或提示未给协方差时使用 |
+| `handover_hint_xy_std_m`、`handover_hint_yaw_std_rad` | 0.03、0.03 | `HANDOVER`阶段内提示未给协方差时使用。SLAM位姿就是在要冻结的这张地图上匹配出来的，本身很准（仿真实测与真实位置差0.003～0.015 m）；用0.10 m的宽粒子云时，AMCL会收敛到它自己受栅格量化影响的最优点，偏开约0.05 m，形成位姿跳变 |
 | `hint_nomotion_updates`、`global_nomotion_updates` | 10、30 | 原地更新次数 |
 | `nomotion_update_rate_hz` | 5.0 | 原地更新频率 |
 | `scan_match_min_ratio` | 0.6 | 匹配度下限 |
@@ -210,15 +211,27 @@ SLAM到AMCL交接演练（2026-10-25，robot_1，测试脚本代行P2的SLAM启�
 |---|---|
 | Task 1：`nav_mode:=slam` + SLAM Toolbox | 代理报告已定位、导航可用；2个探索目标都成功（真实误差约0.04 m） |
 | HANDOVER：记录SLAM位姿、保存地图、停止SLAM、发布冻结地图 | 机器人SAFE停车；确认`slam_toolbox`已不在运行 |
-| 用SLAM位姿调用`relocalize`（位姿提示） | 成功，3.4 s，匹配度0.99；**交接前后位姿跳变0.053 m**（P1计划验收标准为 < 0.05 m，略超） |
+| 用SLAM位姿调用`relocalize`（位姿提示） | 成功，3.4 s，匹配度0.99；首次演练位姿跳变0.053 m（P1计划验收标准为 < 0.05 m，略超） |
 | 交接后 | AMCL active，代理报告已定位、导航可用 |
 | TASK2A导航目标 | 成功，真实误差0.021 m |
+
+交接跳变复测（2026-10-25，同一演练流程，提示不带协方差，跳变 = AMCL结果与SLAM位姿之差）：
+
+| 提示标准差 | 位姿跳变 | 航向跳变 | AMCL与真实位置之差 | 之后TASK2A导航 |
+|---|---|---|---|---|
+| 0.10 m（原默认值） | 0.048 m | 0.014 rad | 0.051 m | — |
+| 0.05 m（测试脚本传入） | 0.027 m | 0.015 rad | 0.029 m | 成功，0.030 m |
+| 0.03 m（测试脚本传入） | 0.018 m | 0.005 rad | 0.017 m | 成功，0.037 m |
+| 0.03 m（`HANDOVER`默认值，两次） | 0.020 m、0.029 m | 0.009、0.010 rad | 0.025 m、0.020 m | 都成功，0.057 m、0.091 m |
+
+跳变前后6 s内保持不变（没有继续漂移）。排查过程：LiDAR测距与墙面几何一致（误差 < 1 mm），没有固定的安装偏移；AMCL在组织方地图上的偏差随位置变化（靠西墙约+0.016 m、靠东墙约-0.045 m，都偏向场地中心），调整`sigma_hit`、`max_beams`、`z_hit`/`z_rand`没有明显改善，说明偏差来自0.05 m栅格的量化，而不是激光模型参数。
 
 ## 7. 已知限制
 
 - **不移动时的全局定位基本无法收敛**，近似对称的场地还可能收敛到错误位置。比赛中应优先使用已知起点或位姿提示（需组织方确认是否提供起点位姿，见TBD登记表）。后续可在允许运动的阶段原地旋转辅助收敛。
 - 已知起点模式要求`map`坐标系与场地坐标系一致，需要P2在Task 1开始时用起点初始化SLAM。
-- 交接前后位姿跳变实测0.053 m，略超P1计划的0.05 m标准；需与P2联调时复测，必要时减小提示协方差或增加原地更新次数。
+- 交接位姿跳变已降到0.02～0.03 m，但这依赖SLAM位姿本身准确；与P2联调时需用真实的SLAM和`map_manager`复测。
+- AMCL相对真实位置有约0.02～0.06 m、随位置变化的偏差（0.05 m栅格量化），调激光模型参数无明显改善。
 - **机器人一旦进入碰撞监视器停车区就无法自行脱困**：停车区对所有方向的速度都置零（包括倒车和原地旋转），只能人工移开或由障碍物自己离开。代理在5 s后报告BLOCKED。
 - AMCL的真实误差约0.06～0.11 m（阶段3实测），与0.10 m的默认导航容差相当；精确目标的成败主要受定位误差影响。
 - 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。

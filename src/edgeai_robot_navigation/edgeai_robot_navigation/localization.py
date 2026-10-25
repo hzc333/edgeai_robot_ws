@@ -24,6 +24,10 @@ activate before map -> base_footprint exists). Modes:
   arena frame (P2 initialises SLAM accordingly).
 * MODE_POSE_HINT: the pose and covariance in the request (map frame). Whether
   an operator may provide a hint is checked by the caller (system_manager).
+  A hint without covariance gets default_hint_*_std, or the tighter
+  handover_hint_*_std during HANDOVER: there the hint is the SLAM pose on the
+  map being frozen, and a wide particle cloud only lets AMCL settle on its own
+  grid-quantised optimum a few centimetres away (a pose jump).
 * MODE_GLOBAL: AMCL global re-initialisation followed by no-motion updates;
   unreliable in a near-symmetric arena and reported as such.
 
@@ -150,6 +154,8 @@ class Localization(Node):
         self.hold_s = float(p('convergence_hold_s', 1.0).value)
         self.hint_xy_std = float(p('default_hint_xy_std_m', 0.10).value)
         self.hint_yaw_std = float(p('default_hint_yaw_std_rad', 0.10).value)
+        self.handover_xy_std = float(p('handover_hint_xy_std_m', 0.03).value)
+        self.handover_yaw_std = float(p('handover_hint_yaw_std_rad', 0.03).value)
         self.hint_updates = int(p('hint_nomotion_updates', 10).value)
         self.global_updates = int(p('global_nomotion_updates', 30).value)
         self.update_rate_hz = float(p('nomotion_update_rate_hz', 5.0).value)
@@ -360,8 +366,12 @@ class Localization(Node):
                     q = hint.pose.pose.orientation
                     yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+                    handover = self.competition is not None and \
+                        self.competition.phase == CompetitionState.PHASE_HANDOVER
+                    xy_std, yaw_std = (self.handover_xy_std, self.handover_yaw_std) if \
+                        handover else (self.hint_xy_std, self.hint_yaw_std)
                     hint = pose_message(hint.pose.pose.position.x, hint.pose.pose.position.y,
-                                        yaw, self.hint_xy_std, self.hint_yaw_std, stamp)
+                                        yaw, xy_std, yaw_std, stamp)
                 hint.header.stamp = stamp
                 self.initialpose_pub.publish(hint)
                 self._nomotion_updates(self.hint_updates)
