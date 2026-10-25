@@ -55,7 +55,7 @@ def _as_bool(text):
     return text.strip().lower() in ('true', '1', 'yes')
 
 
-def render_params(template, robot_id, max_linear, max_angular):
+def render_params(template, robot_id, max_linear, max_angular, bt_dir=''):
     """
     Fill the placeholders of nav2_sim.yaml and nest it under the robot namespace.
 
@@ -66,7 +66,8 @@ def render_params(template, robot_id, max_linear, max_angular):
     """
     text = (template.replace('<ROBOT>', robot_id)
             .replace('<MAX_LINEAR>', repr(float(max_linear)))
-            .replace('<MAX_ANGULAR>', repr(float(max_angular))))
+            .replace('<MAX_ANGULAR>', repr(float(max_angular)))
+            .replace('<BT_DIR>', bt_dir))
     return yaml.safe_dump({robot_id: yaml.safe_load(text)}, sort_keys=False)
 
 
@@ -89,12 +90,14 @@ def _launch_setup(context, *args, **kwargs):
                             else _as_bool(autostart_navigation_text))
 
     resolved = resolve_parameters(run_mode, config_dir)
+    share_config = os.path.join(get_package_share_directory('edgeai_robot_navigation'), 'config')
     template_path = LaunchConfiguration('params_file').perform(context) or os.path.join(
-        get_package_share_directory('edgeai_robot_navigation'), 'config', 'nav2_sim.yaml')
+        share_config, 'nav2_sim.yaml')
     with open(template_path, encoding='utf-8') as stream:
         rendered = render_params(stream.read(), robot_id,
                                  resolved.require('motion.max_linear_speed_mps'),
-                                 resolved.require('motion.max_angular_speed_radps'))
+                                 resolved.require('motion.max_angular_speed_radps'),
+                                 share_config)
     params_file = os.path.join(tempfile.mkdtemp(prefix=f'edgeai_{robot_id}_nav2_'), 'nav2.yaml')
     with open(params_file, 'w', encoding='utf-8') as stream:
         stream.write(rendered)

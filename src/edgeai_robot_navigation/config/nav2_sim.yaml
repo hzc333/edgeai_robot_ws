@@ -6,6 +6,7 @@
 #   <ROBOT>        robot ID, e.g. robot_1 (namespace and frame prefix, ADR-0002)
 #   <MAX_LINEAR>   resolved motion.max_linear_speed_mps  [m/s]
 #   <MAX_ANGULAR>  resolved motion.max_angular_speed_radps [rad/s]
+#   <BT_DIR>       installed config directory of edgeai_robot_navigation
 # The same limits are enforced again by safety_watchdog (ADR-0003).
 #
 # Footprint: relative to <ROBOT>/base_footprint, the drive-axle midpoint. The
@@ -26,10 +27,13 @@ amcl:
     tf_broadcast: true
     transform_tolerance: 1.0
     robot_model_type: "nav2_amcl::DifferentialMotionModel"
-    alpha1: 0.2
-    alpha2: 0.2
-    alpha3: 0.2
-    alpha4: 0.2
+    # Odometry noise model. The Nav2 default 0.2 overstated the noise of the
+    # simulated wheel odometry: the reported spread grew to ~0.31 m during a 4.7 m
+    # drive while the true error stayed near 0.1 m. Re-calibrate on the real robot.
+    alpha1: 0.05
+    alpha2: 0.05
+    alpha3: 0.05
+    alpha4: 0.05
     alpha5: 0.2
     laser_model_type: "likelihood_field"
     laser_min_range: 0.15
@@ -67,6 +71,8 @@ bt_navigator:
     default_server_timeout: 20
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
+    # Fewer recovery retries so unreachable goals fail in seconds (see the XML).
+    default_nav_to_pose_bt_xml: <BT_DIR>/navigate_to_pose_edgeai.xml
     navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -89,10 +95,14 @@ controller_server:
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
     use_realtime_priority: false
-    # No progress of 0.10 m within 10 s aborts the goal (the agent reports BLOCKED).
+    # Neither 0.10 m of travel nor 0.3 rad of rotation within 10 s aborts the goal (the
+    # agent reports BLOCKED). Rotation counts as progress: an in-place 180 deg turn,
+    # halved by the collision monitor's slow zone near walls, takes over 20 s and was
+    # aborted by the SimpleProgressChecker.
     progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
+      plugin: "nav2_controller::PoseProgressChecker"
       required_movement_radius: 0.10
+      required_movement_angle: 0.3
       movement_time_allowance: 10.0
     # robot_agent checks each goal's own tolerance (plan 2-12). Nav2 stops as soon as
     # it is inside this tolerance and a repeated goal does not move the robot, so it

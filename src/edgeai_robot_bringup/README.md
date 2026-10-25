@@ -117,9 +117,10 @@ P1负责的机器人启动包：多机器人仿真启动、每台机器人的软
 语义是“导航到救援位姿并保持静止”。**机器人不计时、不判断救援是否完成**：救援区占用、停留计时和完成只由边缘的`rescue_verifier`判定，完成或改派后由协调器取消本动作以释放机器人。
 
 - **接受条件**：与3.2节相同，另外`rescue_pose`必须在`map`中，`arrival_xy_tolerance_m > 0`。同一时刻只允许一个活动目标（导航或救援）。
-- **逼近**：用Nav2导航到`rescue_pose`；到达判据只看位置（规则3.3），距离 ≤ `arrival_xy_tolerance_m`（开发值0.08 m，必须小于验证器的救援区容差0.15 m）；不满足时再逼近一次，仍不满足返回FAILED。
+- **逼近**：用Nav2导航到`rescue_pose`；到达判据只看位置（规则3.3），距离 ≤ `arrival_xy_tolerance_m`（开发值0.08 m，必须小于验证器的救援区容差0.15 m）；不满足时再逼近一次，仍不满足返回FAILED。`rescue_ignore_orientation`为真（默认）时，发给Nav2的目标朝向换成“当前位置指向目标”的方向，避免到达后再原地转向。
+- **直线回位**：目标在车头或车尾方向上（距离 ≤ `rescue_straight_max_m`，横向偏差 ≤ 0.75倍到达容差）时，先用Nav2的`drive_on_heading`或`backup`行为直线开过去，不转向；到达容差内即完成，否则再用Nav2逼近。原因：机器人大部分车身在轮轴后方，靠墙原地掉头时车尾会扫进碰撞监视器的停车区，机器人会卡住（阶段3实测）。
 - **保持**：`mode=MODE_HOLDING`，反馈`STATE_HOLDING`和`distance_to_rescue_pose_m`（2 Hz）。Nav2空闲，看门狗输出零速度。
-- **被推离**：距离超过“到达容差 + 0.03 m”（滞回）且阶段允许运动时，退出保持并重新逼近，回到后再次保持。
+- **被推离**：距离超过“到达容差 + 0.03 m”（滞回）、阶段允许运动且机器人已停稳（推动结束）时，退出保持并重新逼近，回到后再次保持。被沿车身方向推开时通常走直线回位。
 - **结束**（只有以下几种）：
 
 | 情况 | `terminal_state` | `reason.code` |
@@ -160,7 +161,9 @@ ROS 2动作被取消时无法携带原因，以上“被取消”的三种原因
 | `tf_stale_s` | 0.5 | TF过期判定[s] |
 | `sensor_timeout_s` | 1.0 | 激光无数据判定[s] |
 | `default_xy_tolerance_m` | 0.10 | 目标未给容差时使用[m] |
-| `blocked_after_s` | 5.0 | 碰撞监视器持续停车多久判为受阻[s] |
+| `blocked_after_s` | 5.0 | 碰撞监视器持续停车多久判为受阻[s]。监视器只在状态变化时发布，目标开始前就已停车的，从目标开始时计时 |
+| `rescue_ignore_orientation` | `true` | 救援逼近不要求朝向，见3.3节 |
+| `rescue_straight_max_m`、`rescue_straight_speed_mps` | 0.6、0.08 | 直线回位的最大距离[m]和速度[m/s] |
 | `stop_linear_eps_mps`、`stop_angular_eps_radps` | 0.01、0.02 | 停稳判定 |
 
 超时（`navigation_default`、`safe_stop_ack`、`tf_lookup`、`edge_connection`）和频率读自`interface_runtime.yaml`。
@@ -224,7 +227,7 @@ pixi run test     # 或只测本包：colcon test --packages-select edgeai_robot
 | 两种情况下`/robot_1/cmd_vel`的发布者 | 1个（看门狗） |
 | `run_mode:=competition` | 启动失败，提示`aruco.dictionary`等官方参数未设置 |
 
-`test/test_robot_agent.py`覆盖救援动作：到达后保持直到被释放（`RELEASED_BY_COORDINATOR`）、保持超时、被推离后重新逼近、保持中阶段变化、到达容差为0被拒、逼近失败（BLOCKED）和两次逼近仍超差（FAILED）；以及导航相关的：模式优先级、Nav2错误码映射、容差和协方差判定；以及使用模拟Nav2/TF/里程计/AMCL的行为测试：状态内容、导航成功与NAVIGATING模式、EXPLORING模式、各类拒绝（`run_id`、地图版本、未定位、Nav2未active、FROZEN）、Nav2错误105→BLOCKED和208→FAILED、精确逼近两次后仍超差→FAILED、取消、阶段变化、急停及旧`generation`被忽略、超时、停不下来时报告`COMMAND_TIMEOUT`、激光中断报告`SENSOR_UNAVAILABLE`。
+`test/test_robot_agent.py`覆盖救援动作：到达后保持直到被释放（`RELEASED_BY_COORDINATOR`）、保持超时、被推离后重新逼近（沿车身方向被推时直线倒车、不发Nav2目标，横向被推时用Nav2）、保持中阶段变化、到达容差为0被拒、逼近失败（BLOCKED）和两次逼近仍超差（FAILED）；以及纯逻辑：模式优先级、Nav2错误码映射、容差和协方差判定、直线回位判定；以及使用模拟Nav2/TF/里程计/AMCL的行为测试：状态内容、导航成功与NAVIGATING模式、EXPLORING模式、各类拒绝（`run_id`、地图版本、未定位、Nav2未active、FROZEN）、Nav2错误105→BLOCKED和208→FAILED、精确逼近两次后仍超差→FAILED、取消、阶段变化、急停及旧`generation`被忽略、超时、停不下来时报告`COMMAND_TIMEOUT`、激光中断报告`SENSOR_UNAVAILABLE`。
 
 阶段2验收（2026-10-24，无界面Gazebo，robot_1 + 真实Nav2/AMCL，测试脚本扮演边缘节点发布比赛状态）：
 
@@ -254,8 +257,8 @@ pixi run test     # 或只测本包：colcon test --packages-select edgeai_robot
 - 目前只有仿真启动；实机启动等组织方技术教程后实现（P1计划阶段5）。
 - 机器人ID只能是`robot_1`～`robot_4`。
 - **定位误差占用救援区余量**：代理按AMCL估计判断到达（0.08 m内），但真实误差实测到过0.125 m，接近0.15 m的开发救援区容差。裁判按真实位置判定，P4和P1需在官方容差公布后复核到达容差。
-- **重新逼近较慢**（实测约53 s）：被推到救援区前方后要掉头、低速逼近，并转回目标朝向；救援不要求朝向，可考虑放宽朝向要求，待调参。
-- 不可达目标要等Nav2默认行为树的恢复重试（最多6次）耗尽或代理超时才失败，实测等满60 s。P2探索会遇到不可达前沿，需要减少重试的行为树或更短的探索超时，留到与P2联调时解决。
-- AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数（默认0.2）偏大，待阶段3调参。
+- 重新逼近：沿车身方向被推开时约12 s回位（阶段3实测）；被横向推开时仍要原地转向，靠墙时可能触发停车区而BLOCKED。
+- 不可达目标在阶段3调参后24～37 s失败（之前60 s）。P2探索遇到不可达前沿时，可再配合更短的探索超时。
+- 长距离目标要给足`timeout`：0.15 m/s下穿越场地加上减速区和转向常常超过60 s的默认超时（阶段3实测约50～60 s）。
 - 边缘失联时代理不主动取消目标：看门狗已在1 s内停车，Nav2随后会因无进展判为受阻。
 - 在P2的阶段管理器完成前，需要运动的开发测试只能用`run_mode:=development require_competition_state:=false`，或自行发布`/competition/state`。

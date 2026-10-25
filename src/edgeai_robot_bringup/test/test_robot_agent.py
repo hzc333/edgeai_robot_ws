@@ -29,6 +29,7 @@ from edgeai_robot_bringup.robot_agent import (
     ModeInputs,
     RobotAgent,
     select_mode,
+    straight_line_move,
     within_tolerance,
 )
 from edgeai_robot_interfaces.action import ExecuteNavigationGoal, ExecuteRescueTask
@@ -41,7 +42,7 @@ from edgeai_robot_interfaces.msg import (
     TaskReason,
 )
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import BackUp, DriveOnHeading, NavigateToPose
 from nav_msgs.msg import Odometry
 import pytest
 import rclpy
@@ -99,6 +100,16 @@ def test_tolerance_and_covariance_checks():
     assert not covariance_ok(cov, 0.15, 0.15)
 
 
+def test_straight_line_move():
+    # Pushed forward along the heading: back up; pushed backward: drive forward.
+    assert straight_line_move((1.3, 0.0, 0.0), (1.0, 0.0), 0.6, 0.04) == pytest.approx(-0.3)
+    assert straight_line_move((0.0, 0.7, -math.pi / 2), (0.0, 1.0), 0.6, 0.04) == \
+        pytest.approx(-0.3)
+    assert straight_line_move((0.7, 0.0, 0.0), (1.0, 0.0), 0.6, 0.04) == pytest.approx(0.3)
+    assert straight_line_move((1.0, 0.3, 0.0), (1.0, 0.0), 0.6, 0.04) is None   # sideways
+    assert straight_line_move((2.0, 0.0, 0.0), (1.0, 0.0), 0.6, 0.04) is None   # too far
+
+
 # ---------------------------------------------------------------- fake robot
 
 def _config_dir():
@@ -125,6 +136,7 @@ class FakeRobot(Node):
         self.covariance = [0.0] * 36
         self.covariance[0] = self.covariance[7] = self.covariance[35] = 0.01
         self.nav_goals = 0
+        self.straight_goals = 0
         self.cancelled = 0
         self.tf = TransformBroadcaster(self)
         self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
@@ -134,6 +146,11 @@ class FakeRobot(Node):
                             lambda _req, res: self._is_active(res), callback_group=group)
         ActionServer(self, NavigateToPose, 'navigate_to_pose', execute_callback=self._navigate,
                      cancel_callback=lambda _: CancelResponse.ACCEPT, callback_group=group)
+        for action, name, sign in ((BackUp, 'backup', -1.0),
+                                   (DriveOnHeading, 'drive_on_heading', 1.0)):
+            ActionServer(self, action, name,
+                         execute_callback=lambda h, a=action, s=sign: self._straight(h, a, s),
+                         cancel_callback=lambda _: CancelResponse.ACCEPT, callback_group=group)
         self.create_timer(0.05, self._publish, callback_group=group)
 
     def _is_active(self, response):
@@ -161,6 +178,17 @@ class FakeRobot(Node):
         self.pose = [target.x + self.arrival_offset, target.y, 0.0]
         goal_handle.succeed()
         return result
+
+    def _straight(self, goal_handle, action, sign):
+        self.straight_goals += 1
+        distance = sign * goal_handle.request.target.x
+        self.moving = True
+        time.sleep(0.2)
+        self.moving = False
+        x, y, yaw = self.pose
+        self.pose = [x + distance * math.cos(yaw), y + distance * math.sin(yaw), yaw]
+        goal_handle.succeed()
+        return action.Result()
 
     def _publish(self):
         now = self.get_clock().now().to_msg()
@@ -459,9 +487,15 @@ def test_rescue_reapproaches_when_pushed_away(harness_factory):
     h = harness_factory()
     handle = h.send_rescue(1.0, 0.0)
     assert wait_for(lambda: holding(h), 5.0)
-    h.robot.pose = [1.3, 0.0, 0.0]            # pushed 0.3 m away
-    assert wait_for(lambda: h.robot.nav_goals == 2, 3.0)
+    nav_goals = h.robot.nav_goals
+    h.robot.pose = [1.3, 0.0, 0.0]            # pushed 0.3 m forward: backs up, no turn
+    assert wait_for(lambda: h.robot.straight_goals == 1, 3.0)
     assert wait_for(lambda: holding(h) and h.robot.pose[0] == pytest.approx(1.0), 5.0)
+    assert h.robot.nav_goals == nav_goals
+    h.robot.pose = [1.0, 0.3, 0.0]            # pushed sideways: Nav2 re-approach
+    assert wait_for(lambda: h.robot.nav_goals > nav_goals, 3.0)
+    assert wait_for(lambda: holding(h) and h.robot.pose[1] == pytest.approx(0.0), 5.0)
+    assert h.robot.straight_goals == 1
     handle.cancel_goal_async()
     h.result(handle)
 

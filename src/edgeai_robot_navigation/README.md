@@ -13,14 +13,15 @@ P1负责的导航包：每台机器人的Nav2和AMCL配置与启动、提供`/ro
 
 | 文件 | 作用 |
 |---|---|
-| `config/nav2_sim.yaml` | 一台机器人的Nav2和AMCL参数模板，含占位符`<ROBOT>`、`<MAX_LINEAR>`、`<MAX_ANGULAR>` |
+| `config/nav2_sim.yaml` | 一台机器人的Nav2和AMCL参数模板，含占位符`<ROBOT>`、`<MAX_LINEAR>`、`<MAX_ANGULAR>`、`<BT_DIR>` |
+| `config/navigate_to_pose_edgeai.xml` | `bt_navigator`使用的行为树：Nav2 1.3.10默认树的副本，外层重试从6次减到2次，去掉恢复中的原地旋转（Spin），等待改为2 s。目的是让不可达目标尽快失败，并避免靠墙旋转触发碰撞监视器 |
 | `launch/nav_robot.launch.py` | 在`/robot_N`命名空间启动Nav2（可选AMCL），生成该机器人的参数文件 |
 | `launch/dev_map_server.launch.py` | **仅开发**：在全局`/map`上发布已保存的地图。比赛中`/map`由P2的`map_manager`提供 |
 | `edgeai_robot_navigation/localization.py` | `localization`节点，入口`ros2 run edgeai_robot_navigation localization`，见第3节 |
 | `edgeai_robot_navigation/__init__.py` | Python包入口 |
 | `test/test_localization.py` | `localization`测试：收敛判定、激光与地图匹配度计算，以及使用模拟AMCL和生命周期管理器的服务行为测试 |
 | `test/test_copyright.py`、`test_flake8.py`、`test_pep257.py` | 版权头、代码风格和文档字符串检查 |
-| `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置；`launch/*.py`和`config/*.yaml`安装到包共享目录 |
+| `setup.py`、`setup.cfg`、`package.xml`、`resource/` | `ament_python`包配置；`launch/*.py`、`config/*.yaml`和`config/*.xml`安装到包共享目录 |
 
 ## 2. nav_robot.launch.py
 
@@ -131,7 +132,8 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | | 前视距离 | 0.4 m（0.25～0.6） | |
 | | 先原地转向 | 是，偏差超过0.785 rad时 | 不允许倒车 |
 | | 目标容差 | xy 0.05 m，yaw 0.25 rad | 必须小于任何请求的容差（救援到达0.08 m）：Nav2进入容差后即停止，重复发送同一目标不会再移动。每个目标自己的容差由`robot_agent`检查 |
-| | 无进展判定 | 10 s内移动不足0.10 m | |
+| | 无进展判定 | `PoseProgressChecker`：10 s内移动不足0.10 m**且**转动不足0.3 rad | 默认的`SimpleProgressChecker`只看位移，低速原地转向会被误判为无进展 |
+| `bt_navigator` | 行为树 | `<BT_DIR>/navigate_to_pose_edgeai.xml` | `<BT_DIR>`由启动文件替换为本包共享目录下的`config` |
 | `planner_server` | 规划器 | NavFn，`allow_unknown: true`，容差0.25 m | Task 1需要穿越未知区域规划 |
 | `behavior_server` | 恢复行为 | spin、backup、drive_on_heading、wait | 最大转速`<MAX_ANGULAR>` |
 | `velocity_smoother` | 速度范围 | `[-0.05, <MAX_LINEAR>]` m/s，±`<MAX_ANGULAR>` rad/s | 加速度±0.5 m/s²、±1.0 rad/s² |
@@ -139,6 +141,7 @@ Task 1以`nav_mode:=slam`运行：SLAM发布`map -> robot_N/odom`，导航已激
 | | 减速区 | 足迹外扩0.20 m，速度减半 | |
 | `amcl` | 帧和话题 | `map`、`robot_N/odom`、`robot_N/base_footprint`、`/robot_N/scan`、`/map` | |
 | | 粒子数 / 激光量程 | 500～2000 / 0.15～12 m | |
+| | 运动噪声`alpha1`～`alpha4` / `alpha5` | 0.05 / 0.2 | 默认0.2时行驶中标准差涨到约0.31 m；仿真里程计误差小，0.05时峰值约0.19 m，真实误差不变（约0.09 m）。实机需按里程计质量重调 |
 | | `set_initial_pose` | `false` | 初始位姿只通过`relocalize`给出 |
 
 ## 5. dev_map_server.launch.py
@@ -189,6 +192,18 @@ gz service -s /world/empty/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boo
 | 瞬移后给出偏差1.0 m的错误提示 | 失败（AMCL不收敛，`RELOCALIZATION_FAILED`），代理报告`CODE_RELOCALIZATION_FAILED` |
 | 瞬移后不移动的全局定位 | 失败（不收敛），没有谎报成功 |
 
+阶段3调参（2026-10-25，无界面Gazebo，robot_1和robot_2 + 真实Nav2/AMCL，测试脚本扮演边缘节点）：
+
+| 测试 | 调参前 | 调参后 |
+|---|---|---|
+| A：robot_1行驶约4.7 m到(1.8, 1.8) | AMCL标准差峰值0.31 m | 峰值0.18～0.21 m；成功，真实误差0.09～0.11 m |
+| B：目标在障碍物内部（不可达） | 等满60 s超时 | 24～37 s内FAILED（Nav2错误208） |
+| C：救援保持中被向前推0.35 m | 掉头时车尾扫进停车区，BLOCKED | 倒车回位，推完后约12 s重新HOLDING，真实误差0.083～0.086 m |
+| D：两台机器人路径交叉 | — | 两台都一次成功，真实误差0.056 m和0.082 m，共107 s |
+| 全程控制器“patience exceeded”/“failed to make progress” | 4次 | 0次 |
+
+C的修复在`robot_agent`（见`edgeai_robot_bringup`的README 3.3节）。
+
 SLAM到AMCL交接演练（2026-10-25，robot_1，测试脚本代行P2的SLAM启停和地图保存）：
 
 | 步骤 | 结果 |
@@ -204,8 +219,8 @@ SLAM到AMCL交接演练（2026-10-25，robot_1，测试脚本代行P2的SLAM启�
 - **不移动时的全局定位基本无法收敛**，近似对称的场地还可能收敛到错误位置。比赛中应优先使用已知起点或位姿提示（需组织方确认是否提供起点位姿，见TBD登记表）。后续可在允许运动的阶段原地旋转辅助收敛。
 - 已知起点模式要求`map`坐标系与场地坐标系一致，需要P2在Task 1开始时用起点初始化SLAM。
 - 交接前后位姿跳变实测0.053 m，略超P1计划的0.05 m标准；需与P2联调时复测，必要时减小提示协方差或增加原地更新次数。
-- 两台机器人交会时，控制器出现过几次“controller patience exceeded”和“failed to make progress”，都由恢复行为自动处理，目标最终成功。双机器人调参属于P1计划阶段3。
+- **机器人一旦进入碰撞监视器停车区就无法自行脱困**：停车区对所有方向的速度都置零（包括倒车和原地旋转），只能人工移开或由障碍物自己离开。代理在5 s后报告BLOCKED。
+- AMCL的真实误差约0.06～0.11 m（阶段3实测），与0.10 m的默认导航容差相当；精确目标的成败主要受定位误差影响。
 - 每个目标的精确容差、失败和取消后确认零速度由`edgeai_robot_bringup`的`robot_agent`实现。
-- AMCL报告的协方差在行驶中持续变宽（约0.31 m），可能是运动噪声参数偏大，待调参。
 - 参数只针对仿真；实机参数等实机接入时再定（计划阶段5）。
 - 在`ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`模式下运行两台以上的完整机器人软件栈时，Cyclone DDS会因参与者数量超过默认上限而报“Failed to find a free participant index”，后启动的节点创建失败。解决：设置`CYCLONEDDS_URI='<CycloneDDS><Domain><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex></Discovery></Domain></CycloneDDS>'`。项目默认的`SUBNET`模式不受影响。

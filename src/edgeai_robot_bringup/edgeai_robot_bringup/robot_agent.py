@@ -45,8 +45,8 @@ from edgeai_robot_interfaces.msg import (
     SystemFault,
     TaskReason,
 )
-from geometry_msgs.msg import PoseWithCovarianceStamped
-from nav2_msgs.action import ComputePathToPose, FollowPath, NavigateToPose
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from nav2_msgs.action import BackUp, ComputePathToPose, DriveOnHeading, FollowPath, NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
 from nav_msgs.msg import Odometry
 import rclpy
@@ -130,6 +130,17 @@ class ModeInputs:
     exploring: bool
 
 
+def straight_line_move(pose_xy_yaw, target_xy, max_distance, max_lateral):
+    """Signed distance along the heading that reaches the target, or None if a turn is needed."""
+    dx, dy = target_xy[0] - pose_xy_yaw[0], target_xy[1] - pose_xy_yaw[1]
+    yaw = pose_xy_yaw[2]
+    along = dx * math.cos(yaw) + dy * math.sin(yaw)
+    lateral = -dx * math.sin(yaw) + dy * math.cos(yaw)
+    if abs(along) > max_distance or abs(lateral) > max_lateral:
+        return None
+    return along
+
+
 def select_mode(inputs: ModeInputs):
     """RobotState.mode by the priority table of the P1 plan (2-10)."""
     if inputs.estop_active:
@@ -182,6 +193,14 @@ class RobotAgent(Node):
         self.blocked_after_s = float(p('blocked_after_s', 5.0).value)
         self.stop_linear_eps = float(p('stop_linear_eps_mps', 0.01).value)
         self.stop_angular_eps = float(p('stop_angular_eps_radps', 0.02).value)
+        # Rescue completion does not depend on orientation (rule 3.3): approach with the
+        # heading of travel so Nav2 does not spend time turning to the zone's yaw.
+        self.rescue_ignore_orientation = p('rescue_ignore_orientation', True).value
+        # A robot pushed along its heading drives straight back with the Nav2 BackUp or
+        # DriveOnHeading behavior: turning on the spot to face the target can swing the
+        # long rear overhang into a nearby wall and trip the collision monitor.
+        self.straight_max_m = float(p('rescue_straight_max_m', 0.6).value)
+        self.straight_speed = float(p('rescue_straight_speed_mps', 0.08).value)
 
         if not self.require_state and self.run_mode != 'development':
             raise ValueError('require_competition_state:=false is only allowed in development')
@@ -246,6 +265,9 @@ class RobotAgent(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=False)
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose',
                                        callback_group=group)
+        self.backup_client = ActionClient(self, BackUp, 'backup', callback_group=group)
+        self.drive_client = ActionClient(self, DriveOnHeading, 'drive_on_heading',
+                                         callback_group=group)
         self.nav_active_client = self.create_client(
             Trigger, 'lifecycle_manager_navigation/is_active', callback_group=group)
         self.nav_server = ActionServer(
@@ -447,15 +469,21 @@ class RobotAgent(Node):
                            'navigate_to_pose server unavailable')
         goal = NavigateToPose.Goal()
         goal.pose = pose
-        future = self.nav_client.send_goal_async(goal, feedback_callback=self._on_nav_feedback)
+        handle = self._send_goal(self.nav_client, goal, self._on_nav_feedback)
+        if handle is None:
+            raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_FAILED,
+                           'Nav2 rejected the goal')
+        return handle
+
+    @staticmethod
+    def _send_goal(client, goal, feedback_callback=None):
+        """Send a goal and return its handle, or None when it is not accepted in time."""
+        future = client.send_goal_async(goal, feedback_callback=feedback_callback)
         end = time.monotonic() + 5.0
         while not future.done() and time.monotonic() < end:
             time.sleep(0.02)
         handle = future.result() if future.done() else None
-        if handle is None or not handle.accepted:
-            raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_FAILED,
-                           'Nav2 rejected the goal')
-        return handle
+        return handle if handle is not None and handle.accepted else None
 
     def _on_nav_feedback(self, feedback_msg):
         self.nav_distance_remaining = feedback_msg.feedback.distance_remaining
@@ -480,8 +508,11 @@ class RobotAgent(Node):
             if elapsed > timeout:
                 raise _GoalEnd(NavResult.TERMINAL_FAILED, TaskReason.NAVIGATION_TIMEOUT,
                                f'navigation timeout after {timeout:.0f} s')
-            if self.collision_stop_since is not None and \
-                    time.monotonic() - self.collision_stop_since > self.blocked_after_s:
+            # The collision monitor reports state changes only, so a stop that began
+            # before this goal is timed from the goal's start.
+            stop_since = self.collision_stop_since
+            if stop_since is not None and \
+                    time.monotonic() - max(stop_since, start) > self.blocked_after_s:
                 raise _GoalEnd(NavResult.TERMINAL_BLOCKED, TaskReason.NAVIGATION_FAILED,
                                'blocked: collision monitor stopped the robot')
             if elapsed - last_feedback >= 0.5:
@@ -585,11 +616,60 @@ class RobotAgent(Node):
             else 'navigating'
         goal_handle.publish_feedback(feedback)
 
+    def _approach_pose(self, pose, target):
+        """Rescue goal for Nav2: optionally replace the yaw by the heading of travel."""
+        if not self.rescue_ignore_orientation:
+            return pose
+        self._update_pose()
+        approach = PoseStamped()
+        approach.header = pose.header
+        approach.pose.position = pose.pose.position
+        if self.pose is not None and self._distance_to(target) > 0.05:
+            yaw = math.atan2(target[1] - self.pose[1], target[0] - self.pose[0])
+        else:
+            yaw = self.pose[2] if self.pose is not None else 0.0
+        approach.pose.orientation.z = math.sin(yaw / 2.0)
+        approach.pose.orientation.w = math.cos(yaw / 2.0)
+        return approach
+
+    def _drive_straight(self, goal_handle, distance, target, start):
+        """Drive `distance` metres along the heading (negative: back up); True on success."""
+        client, action = (self.drive_client, DriveOnHeading) if distance > 0.0 else \
+            (self.backup_client, BackUp)
+        if not client.wait_for_server(timeout_sec=0.5):
+            return False
+        goal = action.Goal()
+        goal.target.x = abs(distance)       # BackUp reverses on its own
+        goal.speed = self.straight_speed
+        goal.time_allowance.sec = int(abs(distance) / self.straight_speed * 2.0) + 5
+        handle = self._send_goal(client, goal)
+        if handle is None:
+            return False
+        try:
+            outcome = self._follow(
+                goal_handle, handle, start, self.navigation_default_s, self._release_reason,
+                lambda _elapsed: self._rescue_feedback(
+                    goal_handle, ExecuteRescueTask.Feedback.STATE_NAVIGATING, target))
+        except _GoalEnd:
+            self._cancel_nav2(handle)
+            raise
+        return outcome.status == GoalStatus.STATUS_SUCCEEDED
+
     def _approach(self, goal_handle, pose, target, tolerance):
         """Navigate until within the arrival tolerance; position only (rule 3.3)."""
         start = time.monotonic()
+        self._update_pose()
+        if self.pose is not None and self._distance_to(target) > tolerance:
+            distance = straight_line_move(self.pose[:3], target, self.straight_max_m,
+                                          0.75 * tolerance)
+            if distance is not None and self._drive_straight(goal_handle, distance, target,
+                                                             start):
+                time.sleep(0.2)             # let TF catch up with the end of the move
+                self._update_pose()
+                if self._distance_to(target) <= tolerance:
+                    return 0
         for attempt in (1, 2):
-            nav_handle = self._send_to_nav2(pose)
+            nav_handle = self._send_to_nav2(self._approach_pose(pose, target))
             try:
                 outcome = self._follow(
                     goal_handle, nav_handle, start, self.navigation_default_s,
@@ -636,8 +716,9 @@ class RobotAgent(Node):
                     if hold_timeout > 0.0 and time.monotonic() - first_arrival >= hold_timeout:
                         raise _GoalEnd(RescueResult.TERMINAL_HOLD_TIMEOUT,
                                        TaskReason.HOLD_TIMEOUT, 'hold timeout')
+                    # Re-approach once the push is over, so the move starts from rest.
                     if self._distance_to(target) > tolerance + REAPPROACH_MARGIN_M and \
-                            self._motion_allowed():
+                            self._motion_allowed() and self._stopped():
                         self.holding = False
                         self.get_logger().info('pushed out of the rescue pose; re-approaching')
                         break
