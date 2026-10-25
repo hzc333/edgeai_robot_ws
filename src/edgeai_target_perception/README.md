@@ -107,3 +107,107 @@ ROS 节点验证图像和 CameraInfo 的 frame 为 `robot_N/camera_optical_frame
 本阶段不修改现有 ROS 消息、Schema、配置或几何协议。
 
 Phase 1 和 Phase 2 的合成单元测试应在项目 Linux Pixi 环境中运行；不增加依赖。
+
+## 单机器人 Gazebo 集成测试
+
+集成 fixture 位于 `test/fixtures/aruco_test_world.sdf`，不会改动正式竞赛世界。
+Marker 是 DICT_4X4_50、ID 1，黑框外沿边长 0.15 m；模型用黑白几何格和白色底板构造，
+外侧留有 quiet zone。生成的 PNG 是参考图像，不依赖 Gazebo 的纹理渲染。
+它位于 robot_1 相机前方约 0.9 m，
+正面法线朝向相机并绕竖直轴偏转约 0.4 rad。位姿按 robot_1 出生位置及 xacro 中
+`camera_link`/`camera_optical_frame` 变换计算，而不是将 Gazebo 世界轴误认为相机光学轴。
+
+在仓库根目录用已有 Pixi 环境构建并生成模型和 PNG 参考图：
+
+```bash
+pixi run colcon build --packages-up-to edgeai_robot_bringup edgeai_robot_description edgeai_target_perception --symlink-install
+pixi run python src/edgeai_target_perception/test/fixtures/generate_aruco_marker.py
+```
+
+**终端 A：** 启动独立测试世界及 robot_1。`GZ_SIM_RESOURCE_PATH` 让 Gazebo 找到 Marker
+模型。该命令不运行 `start_sim.sh`，因此不启动正式世界、RViz 或 robot stack。
+
+```bash
+cd /home/xiaomin/projects/edgeai_robot_ws
+pixi shell
+source install/setup.bash
+export EDGEAI_CONFIG_DIR="$PWD/config"
+export GZ_SIM_RESOURCE_PATH="$PWD/src/edgeai_target_perception/test/fixtures${GZ_SIM_RESOURCE_PATH:+:$GZ_SIM_RESOURCE_PATH}"
+export ROS_DOMAIN_ID=67
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 launch edgeai_robot_bringup sim_multi_robot.launch.py \
+  robots:=robot_1 \
+  world:="$PWD/src/edgeai_target_perception/test/fixtures/aruco_test_world.sdf" \
+  headless:=true rviz:=false stack:=false config_dir:="$PWD/config"
+```
+
+**终端 B：** 持续发布临时 Task 1 状态，使用与 detector `control_state` 订阅匹配的可靠、
+Transient Local QoS。持续发布满足 3 秒状态新鲜度限制：
+
+```bash
+cd /home/xiaomin/projects/edgeai_robot_ws
+pixi shell
+source install/setup.bash
+export ROS_DOMAIN_ID=67
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 topic pub -r 1 --qos-reliability reliable --qos-durability transient_local \
+  /competition/state edgeai_robot_interfaces/msg/CompetitionState \
+  "{run_id: 'run-p3-gazebo-test', phase: 1, frozen: false, estop_active: false}"
+```
+
+**终端 C：** 先检查真实 ROS 图像、标定、深度和时钟，然后启动 detector：
+
+```bash
+cd /home/xiaomin/projects/edgeai_robot_ws
+pixi shell
+source install/setup.bash
+export EDGEAI_CONFIG_DIR="$PWD/config"
+export ROS_DOMAIN_ID=67
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 topic echo /clock --once
+ros2 topic echo /robot_1/camera/image --once --field header.frame_id --qos-profile sensor_data
+ros2 topic echo /robot_1/camera/image --once --field encoding --qos-profile sensor_data
+ros2 topic echo /robot_1/camera/camera_info --once --field header.frame_id --qos-profile sensor_data
+ros2 topic echo /robot_1/camera/camera_info --once --field k --qos-profile sensor_data
+ros2 topic echo /robot_1/camera/depth_image --once --field encoding --qos-profile sensor_data
+ros2 run tf2_ros tf2_echo robot_1/camera_link robot_1/camera_optical_frame
+ros2 launch edgeai_target_perception target_detector.launch.py \
+  robot_id:=robot_1 run_mode:=development config_dir:="$PWD/config" use_depth:=true
+```
+
+**终端 D：** 等待观察消息：
+
+```bash
+cd /home/xiaomin/projects/edgeai_robot_ws
+pixi shell
+source install/setup.bash
+export ROS_DOMAIN_ID=67
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 topic echo /robot_1/target_observations \
+  edgeai_robot_interfaces/msg/TargetObservation --once --timeout 30 \
+  --qos-reliability best_effort
+```
+
+验收字段：`marker_id=1`、`target_id=T1`、`robot_id=robot_1`、
+`run_id=run-p3-gazebo-test`，frame 为 `robot_1/camera_optical_frame`，Header stamp 与触发
+该检测的 RGB 图像时间戳相同。核对 RGB 和深度的 frame/尺寸/时间戳及 depth encoding；
+深度同步误差应不超过默认 0.05 秒。测试后在各终端 Ctrl+C 停止模拟器、detector 和状态发布。
+
+### WSL2 实测结果
+
+- Gazebo Harmonic 8.10.0 成功加载独立 `aruco_test` 世界并生成 robot_1；ROS `/clock`、
+  RGB、CameraInfo、深度和 TF 均有数据。
+- RGB 为 `640x480 rgb8`，深度为 `640x480 32FC1`；相机图像、深度和 CameraInfo 的 frame
+  均为 `robot_1/camera_optical_frame`。
+- `camera_link` 到 `camera_optical_frame` 的静态变换可查到；平移为零，RPY 约为
+  `(-1.571, 0, -1.571)`。
+- 开启深度模式时收到有效观察：`marker_id=1`、`target_id=T1`、`robot_id=robot_1`、
+  `run_id=run-p3-gazebo-test`。观察 Header stamp 与对应 RGB、深度及 CameraInfo stamp
+  完全相同，光学 frame 正确；PnP 深度约 `0.897 m`。
+- 深度路径通过，本次无需 RGB-only 对照。Gazebo 日志仍出现 `/dev/dri` EGL 权限警告，
+  但本次传感器渲染和端到端检测成功；硬件加速状态未单独确认。
+
+若深度模式没有观察，先看 detector 是否报告 `depth_inconsistent`、无效深度或时间同步问题，
+随后以 `use_depth:=false` 重启 detector 重测纯 RGB PnP。不要为通过测试而更改 PnP 歧义或深度
+拒绝阈值。若 RGB-only 仍未发布，检查 Gazebo 是否找到 Marker 模型、Marker 是否在图像中可见，以及
+日志中的 unknown ID、PnP 或 ambiguity 诊断。
