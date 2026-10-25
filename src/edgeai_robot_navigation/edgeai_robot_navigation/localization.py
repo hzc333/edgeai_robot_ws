@@ -24,10 +24,14 @@ activate before map -> base_footprint exists). Modes:
   arena frame (P2 initialises SLAM accordingly).
 * MODE_POSE_HINT: the pose and covariance in the request (map frame). Whether
   an operator may provide a hint is checked by the caller (system_manager).
-  A hint without covariance gets default_hint_*_std, or the tighter
-  handover_hint_*_std during HANDOVER: there the hint is the SLAM pose on the
-  map being frozen, and a wide particle cloud only lets AMCL settle on its own
-  grid-quantised optimum a few centimetres away (a pose jump).
+  A hint without covariance gets default_hint_*_std. The one exception is the
+  SLAM -> AMCL handover of the robot that ran SLAM (slam_handover, set by the
+  launch file in slam mode): its first relocalization during HANDOVER gets the
+  tighter handover_hint_*_std. That hint is the SLAM pose on the map being
+  frozen; a wide particle cloud only lets AMCL settle on its own grid-quantised
+  optimum a few centimetres away (a pose jump). Placement hints for the other
+  robots can be off by 0.1 m or more and keep the wide default, otherwise a tight
+  cloud would converge confidently next to the true pose.
 * MODE_GLOBAL: AMCL global re-initialisation followed by no-motion updates;
   unreliable in a near-symmetric arena and reported as such.
 
@@ -156,6 +160,7 @@ class Localization(Node):
         self.hint_yaw_std = float(p('default_hint_yaw_std_rad', 0.10).value)
         self.handover_xy_std = float(p('handover_hint_xy_std_m', 0.03).value)
         self.handover_yaw_std = float(p('handover_hint_yaw_std_rad', 0.03).value)
+        self.slam_handover_pending = bool(p('slam_handover', False).value)
         self.hint_updates = int(p('hint_nomotion_updates', 10).value)
         self.global_updates = int(p('global_nomotion_updates', 30).value)
         self.update_rate_hz = float(p('nomotion_update_rate_hz', 5.0).value)
@@ -366,8 +371,9 @@ class Localization(Node):
                     q = hint.pose.pose.orientation
                     yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-                    handover = self.competition is not None and \
-                        self.competition.phase == CompetitionState.PHASE_HANDOVER
+                    handover = self.slam_handover_pending and (
+                        self.competition is None or
+                        self.competition.phase == CompetitionState.PHASE_HANDOVER)
                     xy_std, yaw_std = (self.handover_xy_std, self.handover_yaw_std) if \
                         handover else (self.hint_xy_std, self.hint_yaw_std)
                     hint = pose_message(hint.pose.pose.position.x, hint.pose.pose.position.y,
@@ -393,6 +399,7 @@ class Localization(Node):
                 self._startup(self.nav_manager, self.nav_active, 'navigation',
                               max(deadline - time.monotonic(), 5.0))
             response.success = True
+            self.slam_handover_pending = False
             response.estimated_pose = estimate
             response.reason = TaskReason(code=TaskReason.NONE, detail='')
             response.message = (f'relocalized by {note} in {time.monotonic() - started:.1f} s, '

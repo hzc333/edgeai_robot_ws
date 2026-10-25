@@ -203,9 +203,8 @@ class Harness:
         self.diagnostics = []
         self.edge.create_subscription(DiagnosticArray, '/diagnostics',
                                       lambda m: self.diagnostics.extend(m.status), 10)
-        self.phase = CompetitionState.PHASE_HANDOVER
         self.edge.create_timer(0.2, lambda: self.state_pub.publish(CompetitionState(
-            run_id=RUN_ID, map_id=MAP_ID, map_revision=1, phase=self.phase)))
+            run_id=RUN_ID, map_id=MAP_ID, map_revision=1, phase=CompetitionState.PHASE_HANDOVER)))
         self.client = self.edge.create_client(Relocalize, '/robot_1/relocalize')
         self.executor = MultiThreadedExecutor(num_threads=8)
         for node in (self.node, self.fake, self.edge):
@@ -269,24 +268,35 @@ def _hint(x, y):
 
 
 def test_pose_hint_uses_default_covariance_when_missing(harness):
-    harness.phase = CompetitionState.PHASE_TASK2A
-    time.sleep(0.5)
+    # Also during HANDOVER: a placement hint for a robot that did not run SLAM.
     response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=_hint(1.0, 0.5))
     assert response.success, response.message
     assert harness.fake.pose == (1.0, 0.5)
     assert harness.fake.initial_covariance[0] == pytest.approx(0.10 ** 2)
 
 
-def test_pose_hint_during_handover_uses_tight_covariance(harness):
-    response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=_hint(1.0, 0.5))
-    assert response.success, response.message
-    assert harness.fake.initial_covariance[0] == pytest.approx(0.03 ** 2)
-    assert harness.fake.initial_covariance[35] == pytest.approx(0.03 ** 2)
-    hint = _hint(1.0, 0.5)                    # an explicit covariance is kept
-    hint.pose.covariance[0] = hint.pose.covariance[7] = hint.pose.covariance[35] = 0.0016
-    response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=hint)
-    assert response.success, response.message
-    assert harness.fake.initial_covariance[0] == pytest.approx(0.0016)
+def test_slam_handover_hint_uses_tight_covariance_once():
+    rclpy.init()
+    harness = Harness(slam_handover=True)
+    try:
+        hint = _hint(1.0, 0.5)                # an explicit covariance is kept
+        hint.pose.covariance[0] = hint.pose.covariance[7] = hint.pose.covariance[35] = 0.0016
+        harness.fake.converge = False         # a failed handover leaves it pending
+        assert not harness.call(mode=Relocalize.Request.MODE_POSE_HINT, pose_hint=hint).success
+        assert harness.fake.initial_covariance[0] == pytest.approx(0.0016)
+        harness.fake.converge = True
+        response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT,
+                                pose_hint=_hint(1.0, 0.5))
+        assert response.success, response.message
+        assert harness.fake.initial_covariance[0] == pytest.approx(0.03 ** 2)
+        assert harness.fake.initial_covariance[35] == pytest.approx(0.03 ** 2)
+        response = harness.call(mode=Relocalize.Request.MODE_POSE_HINT,
+                                pose_hint=_hint(1.0, 0.5))
+        assert response.success, response.message   # later hints: the wide default
+        assert harness.fake.initial_covariance[0] == pytest.approx(0.10 ** 2)
+    finally:
+        harness.close()
+        rclpy.shutdown()
 
 
 def test_pose_hint_must_be_in_map(harness):

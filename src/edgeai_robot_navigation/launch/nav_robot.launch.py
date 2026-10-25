@@ -103,6 +103,8 @@ def _launch_setup(context, *args, **kwargs):
         stream.write(rendered)
 
     common = {'use_sim_time': use_sim_time}
+    footprint = yaml.safe_load(rendered)[robot_id]['local_costmap']['local_costmap'][
+        'ros__parameters']['footprint']
 
     def nav2_node(package, executable, name=None, remappings=()):
         return Node(package=package, executable=executable, name=name or executable,
@@ -119,6 +121,10 @@ def _launch_setup(context, *args, **kwargs):
                   remappings=[('cmd_vel', 'cmd_vel_nav')]),
         nav2_node('nav2_collision_monitor', 'collision_monitor'),
         nav2_node('nav2_bt_navigator', 'bt_navigator'),
+        # The other robots are below the LiDAR plane: obstacles from the shared /tf.
+        Node(package='edgeai_robot_navigation', executable='peer_footprints',
+             name='peer_footprints', output='screen',
+             parameters=[common, {'robot_id': robot_id, 'footprint': footprint}]),
         Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
              name='lifecycle_manager_navigation', output='screen',
              parameters=[common, {'autostart': autostart_navigation,
@@ -141,6 +147,8 @@ def _launch_setup(context, *args, **kwargs):
                  'require_competition_state': require_state,
                  'start_poses_yaml': yaml.safe_dump(
                      resolved.get('localization.start_poses', {}) or {}),
+                 # Its first relocalization is the SLAM -> AMCL handover.
+                 'slam_handover': mode == 'slam',
              }]),
     ]
     return [GroupAction([PushRosNamespace(robot_id), *nodes])]

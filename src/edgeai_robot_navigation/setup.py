@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'localization = edgeai_robot_navigation.localization:main',
+            'peer_footprints = edgeai_robot_navigation.peer_footprints:main',
         ],
     },
 )

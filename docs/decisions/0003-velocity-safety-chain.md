@@ -43,7 +43,7 @@ Nav2 controller_server ─cmd_vel_nav─> velocity_smoother ─cmd_vel_smoothed�
 
 ### 3. 碰撞监视器
 
-`nav2_collision_monitor`以`/robot_N/scan`为数据源，设置停车多边形（足迹外扩0.05 m）和减速多边形（外扩0.20 m，减速比0.5）。它位于看门狗之前，只能降低或清零速度，不能绕过看门狗。
+`nav2_collision_monitor`以`/robot_N/scan`和`/robot_N/peer_footprints`（其他机器人的足迹，见`edgeai_robot_navigation`的README 4.1节；其他机器人的底盘低于LiDAR扫描平面）为数据源，设置停车多边形（足迹外扩0.05 m）和减速多边形（外扩0.20 m，减速比0.5）。它位于看门狗之前，只能降低或清零速度，不能绕过看门狗。
 
 ## 原因
 
