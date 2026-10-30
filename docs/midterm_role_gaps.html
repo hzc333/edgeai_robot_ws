@@ -106,7 +106,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
     <div class="stat ask"><b>5</b><span>个问题需要向组织方确认</span></div>
     <div class="stat time"><b>10 天</b><span>距按协作规则冻结 <code>main</code>（11-09）</span></div>
   </div>
-  <p><strong>2026-10-30 更新：</strong>建议由 P1 和 P5 负责的 7 项（G1、G3、G4、G9、G10 的材料部分、G11、C3）已写进 <code>docs/team_responsibilities.md</code>，页面中标为“已分配”。仍待认领或决定的是第 2、3 节中没有“已分配”标记的条目，也汇总在分工文档第 11.2 节。</p>
+  <p><strong>2026-10-30 更新：</strong>P1 负责 G1、G4、G9、C3；P5 负责 G2、G5、G7（原建议给 P2、P3 的代码类工作）。这 7 项已写进 <code>docs/team_responsibilities.md</code>，页面中标为“已分配”。G3、G10、G11 退回待认领。仍待认领或决定的是第 2、3 节中没有“已分配”标记的条目，也汇总在分工文档第 11.2 节。</p>
   <p>现有分工是按正式比赛（Task 1 → 冻结 → Task 2A → Task 2B）设计的，各模块本身覆盖得比较完整。缺口集中在三类“没人认领的中间地带”：<strong>中期专用的仿真场地和 ArUco 标记</strong>（组织方明确不提供，要求各队自建）、<strong>Part 1 与 Part 2 之间的衔接</strong>（预建地图、给定目标坐标、计时内切换），以及<strong>结果验证材料</strong>（碰撞状态、距离曲线、演示当天的分工）。</p>
 </section>
 
@@ -119,11 +119,11 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
     <tbody>
       <tr><td class="group" colspan="4">准备工作（第 2、3、7 节）</td></tr>
       <tr><td>按图 1 自建 Gazebo 场地：外墙、W1/W1b/W2、O2/O3、起始区（§2、§7）</td><td>P1</td><td><span class="chip done">已分配 G1</span></td><td>现有世界是另一套布局，坐标以场地中心为原点</td></tr>
-      <tr><td>ArUco 标记与支架：DICT_4X4_50，ID 1=S1、ID 2=C1，0.16 m，中心离地 0.35 m，竖直、朝向指定方向（§3）</td><td>无</td><td><span class="chip gap">缺口 G2</span></td><td>P3 分支只有一个 0.15 m、ID 1 的测试标记，放在没有墙的测试世界里</td></tr>
-      <tr><td>中期参数与真值：S1/C1 坐标、半径、ID 与类型、起始区（§3）</td><td>P5</td><td><span class="chip done">已分配 G3</span></td><td><code>competition_parameters.yaml</code> 里是另一套开发值</td></tr>
+      <tr><td>ArUco 标记与支架：DICT_4X4_50，ID 1=S1、ID 2=C1，0.16 m，中心离地 0.35 m，竖直、朝向指定方向（§3）</td><td>P5</td><td><span class="chip done">已分配 G2</span></td><td>P3 分支只有一个 0.15 m、ID 1 的测试标记，放在没有墙的测试世界里</td></tr>
+      <tr><td>中期参数与真值：S1/C1 坐标、半径、ID 与类型、起始区（§3）</td><td>无（官方参数登记归 P5）</td><td><span class="chip gap">缺口 G3</span></td><td><code>competition_parameters.yaml</code> 里是另一套开发值</td></tr>
       <tr><td>两台机器人从起始区出发、互不碰撞（§2、§7）</td><td>P1</td><td><span class="chip done">已分配 C3</span></td><td>起点配置仍是旧坐标 (-1.5, -1.5)</td></tr>
       <tr><td>检查 C1 能同时容纳两台机器人；两个标记能从可到达的位置看到（§7）</td><td>P1</td><td><span class="chip done">已分配 G4</span></td><td>相机离地约 0.10 m、水平视场 60°，看全 0.35 m 高的标记估计要离开 0.8 m 以上</td></tr>
-      <tr><td>Part 2 用的预建占据栅格地图（§5、§7）</td><td>无（SLAM 和地图质量归 P2）</td><td><span class="chip gap">缺口 G5</span></td><td>—</td></tr>
+      <tr><td>Part 2 用的预建占据栅格地图（§5、§7）</td><td>P5</td><td><span class="chip done">已分配 G5</span></td><td>—</td></tr>
       <tr><td class="group" colspan="4">Part 1：自主探索、SLAM 建图、目标检测（第 4 节）</td></tr>
       <tr><td>至少一台机器人从起始区自主探索并实时建图</td><td>P2</td><td><span class="chip ok">已覆盖</span></td><td>仓库中暂未看到 P2 代码</td></tr>
       <tr><td>开始前清空地图、探索状态和检测结果</td><td>P2（运行编排）、P3（目标注册表）</td><td><span class="chip ok">已覆盖</span></td><td>需要写进启动步骤</td></tr>
@@ -132,17 +132,17 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
       <tr><td>记录每次检测：ID、目标类型、相机或机器人坐标系下的相对位置、检测时间；提供叠加图像或话题/日志</td><td>P3</td><td><span class="chip ok">已覆盖</span></td><td>P3 分支已有检测和多机器人融合；需补中期要求的记录格式</td></tr>
       <tr><td class="group" colspan="4">Part 2：自主救援（第 5 节）</td></tr>
       <tr><td>两台机器人在预建地图上定位、自主导航、避免一切碰撞</td><td>P1</td><td><span class="chip ok">已覆盖</span></td><td><code>main</code> 已有定位、导航、“到达并保持”动作和机器人互相避让（10 轮对向测试 20/20）</td></tr>
-      <tr><td>直接使用给定的 S1/C1 坐标作为任务输入</td><td>无</td><td><span class="chip gap">缺口 G7</span></td><td>现有架构里目标只来自 Task 1 冻结列表</td></tr>
+      <tr><td>直接使用给定的 S1/C1 坐标作为任务输入</td><td>P5</td><td><span class="chip done">已分配 G7</span></td><td>现有架构里目标只来自 Task 1 冻结列表</td></tr>
       <tr><td>按目标类型自动分配 1 台或 2 台机器人，状态自动转换</td><td>P4</td><td><span class="chip ok">已覆盖</span></td><td>仓库中暂未看到 P4 代码</td></tr>
       <tr><td>完成判定：到目标中心水平距离 ≤ 0.5 m / 0.7 m，连续 10 s（仿真时间），离开即清零，C1 两台同时满足</td><td>P4（验证器）、P3（救援几何）</td><td><span class="chip warn">冲突 C1</span></td><td>现有约定是“救援区中心 ± 0.15 m、停留 3 s”</td></tr>
       <tr><td>Part 1 → Part 2 的切换计入 13 分钟</td><td>无</td><td><span class="chip gap">缺口 G8</span></td><td>Part 1 结束时 robot_1 不在起始区</td></tr>
       <tr><td class="group" colspan="4">结果验证（第 6、7 节）</td></tr>
       <tr><td>展示保存的地图、两个标记的检测证据</td><td>P2、P3</td><td><span class="chip ok">已覆盖</span></td><td>—</td></tr>
-      <tr><td>S1、C1 的完成记录、机器人到目标的距离历史、完成标志</td><td>P5（材料）、P4（数据）</td><td><span class="chip done">已分配 G10</span></td><td>数据有人产生，但没人负责整理成 2 分钟内能展示的材料</td></tr>
+      <tr><td>S1、C1 的完成记录、机器人到目标的距离历史、完成标志</td><td>P4（数据）</td><td><span class="chip part">部分覆盖 G10</span></td><td>数据有人产生，但没人负责整理成 2 分钟内能展示的材料</td></tr>
       <tr><td>碰撞状态记录</td><td>P1</td><td><span class="chip done">已分配 G9</span></td><td>—</td></tr>
       <tr><td>13 分钟计时记录</td><td>P2（运行记录）</td><td><span class="chip part">部分覆盖 G10</span></td><td>—</td></tr>
       <tr><td class="group" colspan="4">组织与流程</td></tr>
-      <tr><td>修改场地几何或目标坐标须事先与组织方商定（§7）</td><td>P5</td><td><span class="chip done">已分配 G11</span></td><td>—</td></tr>
+      <tr><td>修改场地几何或目标坐标须事先与组织方商定（§7）</td><td>无</td><td><span class="chip gap">缺口 G11</span></td><td>—</td></tr>
       <tr><td>演示当天操作、计时、讲解和应急分工</td><td>部分（完整演练 A = P2）</td><td><span class="chip part">部分覆盖 G10</span></td><td>—</td></tr>
       <tr><td>成员姓名和备份人</td><td>全组</td><td><span class="chip gap">缺口 G12</span></td><td><code>config/team_assignments.yaml</code> 全部为空</td></tr>
     </tbody>
@@ -169,8 +169,8 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
       </dl>
     </article>
 
-    <article class="item">
-      <div class="item-head"><span class="item-id">G2</span><h3>ArUco 标记与支架模型</h3></div>
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G2</span><h3>ArUco 标记与支架模型</h3><span class="chip done">已分配：P5</span></div>
       <dl>
         <dt>中期依据</dt><dd>§3：DICT_4X4_50，S1 用 ID 1、C1 用 ID 2；印刷边长 0.16 m（不含白边），中心离地约 0.35 m；竖直装在独立支架上；S1 朝下方开阔区域，C1 朝北；目标参考点是支架正下方的地面点。</dd>
         <dt>为什么是缺口</dt><dd>P3 负责“检测”，没人负责“把标记做进仿真”。P3 分支里只有一个 0.15 m、ID 1 的测试标记，测试世界里没有墙。</dd>
@@ -179,12 +179,12 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
           <li>支架要能被 LiDAR 看到：LiDAR 扫描高度 0.155 m，比这低的底座激光看不见，导航可能撞上；支架的轮廓也要出现在 Part 2 的预建地图里。</li>
           <li>按 §3 的位置和朝向放进 G1 的世界。</li>
         </ul></dd>
-        <dt>建议</dt><dd class="owner">A = P3（标记模型与可检测性）；R = P1（放进世界、确认不阻碍导航）</dd>
+        <dt>分配</dt><dd class="owner">A = P5；R = P1（放进世界、确认不阻碍导航）；C = P3（确认能被检测）</dd>
       </dl>
     </article>
 
-    <article class="item assigned">
-      <div class="item-head"><span class="item-id">G3</span><h3>中期参数与真值文件</h3><span class="chip done">已分配：P5</span></div>
+    <article class="item">
+      <div class="item-head"><span class="item-id">G3</span><h3>中期参数与真值文件</h3><span class="chip gap">待认领</span></div>
       <dl>
         <dt>中期依据</dt><dd>§3 的参数表，以及 §6 验证时要比较的目标位置。</dd>
         <dt>为什么是缺口</dt><dd>P5 负责“官方参数登记”，但中期这套参数没有人录入；P3 评测检测误差、P4 生成救援任务、验证展示都要用同一份真值。</dd>
@@ -206,13 +206,13 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
       </dl>
     </article>
 
-    <article class="item">
-      <div class="item-head"><span class="item-id">G5</span><h3>Part 2 预建地图</h3></div>
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G5</span><h3>Part 2 预建地图</h3><span class="chip done">已分配：P5</span></div>
       <dl>
         <dt>中期依据</dt><dd>§5、§7：Part 2 可以使用各队事先准备的地图，组织方不提供。</dd>
         <dt>为什么是缺口</dt><dd>P2 负责 SLAM 质量，P1 负责在地图上定位，但“中期地图”这个具体交付物没人认领。</dd>
         <dt>交付物</dt><dd>中期场地的地图（PGM + YAML）提交到仓库，原点与场地坐标一致，包含支架轮廓；P1 在这张图上完成两台机器人的定位和导航验收。</dd>
-        <dt>建议</dt><dd class="owner">A = P2；R = P1</dd>
+        <dt>分配</dt><dd class="owner">A = P5；R = P1；C = P2</dd>
       </dl>
     </article>
 
@@ -226,13 +226,13 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
       </dl>
     </article>
 
-    <article class="item">
-      <div class="item-head"><span class="item-id">G7</span><h3>Part 2 的目标输入（给定坐标）</h3></div>
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G7</span><h3>Part 2 的目标输入（给定坐标）</h3><span class="chip done">已分配：P5</span></div>
       <dl>
         <dt>中期依据</dt><dd>§5：可以直接使用 S1 (1.0, 4.1)、C1 (4.1, 1.0) 的给定坐标，不需要重新识别。</dd>
         <dt>为什么是缺口</dt><dd>现有架构里 P4 只从 P3 的 Task 1 冻结目标列表生成任务。Part 2 和 Part 1 独立，需要一个从配置读取给定坐标、发布同样格式目标的入口，没人负责。</dd>
         <dt>交付物</dt><dd>从 G3 的配置生成目标列表和救援位姿（S1 一个、C1 两个，都在半径以内、避开支架），P4 无需改代码就能使用。</dd>
-        <dt>建议</dt><dd class="owner">A = P3（目标注册表本来就归 P3）；C = P4</dd>
+        <dt>分配</dt><dd class="owner">A = P5；C = P3（目标接口）、P4</dd>
       </dl>
     </article>
 
@@ -257,7 +257,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
     </article>
 
     <article class="item warn">
-      <div class="item-head"><span class="item-id">G10</span><h3>结果验证材料与演示当天分工</h3><span class="chip done">材料已分配：P5</span><span class="chip gap">当天分工待定</span></div>
+      <div class="item-head"><span class="item-id">G10</span><h3>结果验证材料与演示当天分工</h3><span class="chip gap">待认领</span></div>
       <dl>
         <dt>中期依据</dt><dd>§6：2 分钟内展示地图、两个标记的检测证据、S1 和 C1 连续 10 s 的记录、距离历史、完成标志和碰撞状态。</dd>
         <dt>现状</dt><dd>数据分别由 P2（地图、计时）、P3（检测）、P4（救援记录）产生，“完整演练”的 A 是 P2；但没人负责把它们汇总成 2 分钟内能讲完的一页材料或一个界面，也没定当天谁操作、谁计时、谁讲解、出问题谁处理。</dd>
@@ -266,8 +266,8 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
       </dl>
     </article>
 
-    <article class="item assigned">
-      <div class="item-head"><span class="item-id">G11</span><h3>与组织方的沟通</h3><span class="chip done">已分配：P5</span></div>
+    <article class="item">
+      <div class="item-head"><span class="item-id">G11</span><h3>与组织方的沟通</h3><span class="chip gap">待认领</span></div>
       <dl>
         <dt>中期依据</dt><dd>§7：修改场地几何或目标坐标必须事先与组织方商定。</dd>
         <dt>为什么是缺口</dt><dd>P5 负责登记规则和 TBD，但没人被指定去问组织方、并把答复写回文档。第 4 节的问题需要尽快问。</dd>
