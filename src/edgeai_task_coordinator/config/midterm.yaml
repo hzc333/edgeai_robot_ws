@@ -1,0 +1,46 @@
+# Source: KTH_EdgeAI_Midterm_Check_Task_Description.docx, sections 3 and 5.
+# These are MIDTERM rules, not a claim about future final-competition rules.
+schema_version: 1
+rule_profile: kth-midterm-2026
+frame_id: map
+robots: [robot_1, robot_2]
+targets:
+  - id: S1
+    marker_id: 1
+    center: [1.0, 4.1]
+    radius_m: 0.5
+    required_robots: 1
+    dwell_s: 10.0
+    # Engineering choices: navigation goals, NOT verification circle centers.
+    # P1 may ignore these goal headings during its rescue approach.
+    slots: [[1.0, 4.45, -1.5707963267948966]]
+    # Approach from the west so the robot can subsequently depart east without
+    # sweeping its rear over the stand during a 180-degree turn.
+    approaches: [[0.55, 4.45, 0.0]]
+  - id: C1
+    marker_id: 2
+    center: [4.1, 1.0]
+    radius_m: 0.7
+    required_robots: 2
+    dwell_s: 10.0
+    # Farther slot goes first. Serial approach avoids blocking the entry.
+    slots: [[4.5, 1.45, -1.5707963267948966], [3.85, 1.5, -1.5707963267948966]]
+    approaches: [[4.5, 2.2, -1.5707963267948966], [3.95, 2.3, -1.695151321341658]]
+engineering:
+  arrival_tolerance_m: 0.06
+  state_stale_s: 0.5
+  maximum_state_skew_s: 0.25
+  phase_heartbeat_timeout_s: 2.0
+  action_response_timeout_s: 5.0
+  navigation_timeout_s: 150.0
+  partner_wait_timeout_s: 180.0
+  release_timeout_s: 5.0
+  max_attempts: 2
+  # Used only to rank paths for allocation. P1 owns the real footprint/Nav2.
+  allocation_clearance_m: 0.26
+  # Engineering guard for asynchronous state/ground-truth sampling, beyond the
+  # official 10s. It never reduces the official dwell requirement.
+  completion_guard_s: 0.3
+  # Explicit timeout on P1 ExecuteNavigationGoal (P1 uses wall-clock time).
+  executor_timeout_wall_s: 240.0
+  # P4 does not own the shared 13-minute task clock. P2 must provide it.

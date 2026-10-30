@@ -1,0 +1,61 @@
+# Copyright 2026 EdgeAI Robotics Challenge Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""P4-only integration fixture: real P1 robots/Nav2, no production phase owner."""
+
+import os
+from pathlib import Path
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+
+
+def _setup(context):
+    p4 = Path(get_package_share_directory('edgeai_task_coordinator'))
+    description = Path(get_package_share_directory('edgeai_robot_description'))
+    bringup = Path(get_package_share_directory('edgeai_robot_bringup'))
+    navigation = Path(get_package_share_directory('edgeai_robot_navigation'))
+    config = LaunchConfiguration('config_dir').perform(context)
+
+    def include(path, arguments):
+        return IncludeLaunchDescription(PythonLaunchDescriptionSource(str(path)),
+                                        launch_arguments=arguments.items())
+
+    actions = [
+        include(description / 'launch' / 'sim_world.launch.py', {
+            'world': str(p4 / 'test_assets' / 'midterm.sdf'),
+            'headless': LaunchConfiguration('headless').perform(context)}),
+        include(navigation / 'launch' / 'dev_map_server.launch.py', {
+            'map': str(p4 / 'test_assets' / 'midterm.yaml'), 'use_sim_time': 'true'}),
+    ]
+    for robot_id, x in [('robot_1', 0.55), ('robot_2', 1.20)]:
+        actions += [
+            include(description / 'launch' / 'sim_robot.launch.py', {
+                'robot_id': robot_id, 'x': str(x), 'y': '0.5', 'yaw': '0.0'}),
+            include(bringup / 'launch' / 'robot_stack.launch.py', {
+                'robot_id': robot_id, 'run_mode': 'development', 'config_dir': config,
+                'use_sim_time': 'true', 'require_competition_state': 'true', 'nav_mode': 'amcl'}),
+        ]
+    return actions
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('config_dir', default_value=os.environ.get('EDGEAI_CONFIG_DIR', '')),
+        DeclareLaunchArgument('headless', default_value='true'),
+        OpaqueFunction(function=_setup),
+    ])
