@@ -1,0 +1,366 @@
+<title>中期检查分工缺口</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column (requirement docs), wide tables scroll in place; status is carried by coloured chips. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #18212d;
+  --muted: #5a6575;
+  --line: #d6dce4;
+  --accent: #1d5aa6;
+  --accent-soft: #e3ecf8;
+  --gap: #b3362c;
+  --gap-soft: #fbe9e7;
+  --warn: #9a6400;
+  --warn-soft: #fbf1dc;
+  --ok: #2c7347;
+  --ok-soft: #e4f3ea;
+  --font-display: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161d; --surface: #18202a; --ink: #e5eaf1; --muted: #9aa6b5; --line: #2c3746;
+    --accent: #7fb0f0; --accent-soft: #1d2c40; --gap: #f08a7e; --gap-soft: #3a1f1d;
+    --warn: #e6b45a; --warn-soft: #3a2e17; --ok: #7fcf9b; --ok-soft: #183323; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161d; --surface: #18202a; --ink: #e5eaf1; --muted: #9aa6b5; --line: #2c3746;
+  --accent: #7fb0f0; --accent-soft: #1d2c40; --gap: #f08a7e; --gap-soft: #3a1f1d;
+  --warn: #e6b45a; --warn-soft: #3a2e17; --ok: #7fcf9b; --ok-soft: #183323; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.7; }
+.page { max-width: 980px; margin: 0 auto; padding-block: 32px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 40px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--muted); }
+h1 { font-family: var(--font-display); font-size: clamp(26px, 5vw, 34px); line-height: 1.3; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-size: 22px; line-height: 1.35; margin: 0; text-wrap: balance; }
+h3 { font-size: 16px; margin: 0; line-height: 1.5; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); }
+section { display: grid; gap: 16px; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 4px; }
+.stat b { font-size: 28px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.stat.gap b { color: var(--gap); } .stat.warn b { color: var(--warn); } .stat.ask b { color: var(--accent); } .stat.time b { color: var(--ink); }
+.stat span { color: var(--muted); font-size: 13px; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 12px; letter-spacing: .04em; color: var(--muted); font-weight: 500; background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td.group { background: var(--accent-soft); font-weight: 700; color: var(--accent); }
+.chip { display: inline-block; font-size: 12px; line-height: 1.6; padding: 0 8px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+.chip.gap { background: var(--gap-soft); color: var(--gap); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.part { background: var(--accent-soft); color: var(--accent); }
+.chip.done { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok); }
+.item.assigned { border-left-color: var(--ok); }
+.item.assigned .item-id { color: var(--ok); }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+.items { display: grid; gap: 14px; }
+.item { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--gap); border-radius: 8px; padding: 16px 18px; display: grid; gap: 10px; min-width: 0; }
+.item.warn { border-left-color: var(--warn); }
+.item-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+.item-id { font-family: var(--font-mono); font-weight: 500; color: var(--gap); }
+.item.warn .item-id { color: var(--warn); }
+dl { display: grid; grid-template-columns: 6.5em 1fr; gap: 6px 12px; margin: 0; }
+dt { color: var(--muted); font-size: 13px; padding-top: 1px; }
+dd { margin: 0; min-width: 0; }
+dd ul { margin: 0; padding-left: 1.2em; }
+.owner { font-weight: 500; }
+ol.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+ol.timeline li { display: grid; grid-template-columns: 7.5em 1fr; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+ol.timeline li:last-child { border-bottom: 0; }
+ol.timeline .d { font-family: var(--font-mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+ol.timeline li.hard .d { color: var(--gap); font-weight: 500; }
+ul.plain { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; max-width: 72ch; }
+.note { font-size: 13px; color: var(--muted); }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+@media (max-width: 560px) {
+  dl { grid-template-columns: 1fr; gap: 2px; }
+  dt { margin-top: 6px; }
+  ol.timeline li { grid-template-columns: 1fr; gap: 2px; }
+}
+</style>
+
+<div class="page">
+<header>
+  <div class="eyebrow">KTH EDGEAI ROBOTICS CHALLENGE · 中期检查 2026-11-12（上午）</div>
+  <h1>中期检查分工缺口清单</h1>
+  <p class="lede">依据《Midterm Check — Task Description》，逐条对照仓库里的 <code>docs/team_responsibilities.md</code>（团队工作协议 v0.1）、<code>docs/package_and_node_layout.md</code>、<code>docs/development_and_integration_plan.md</code>、<code>config/competition_parameters.yaml</code> 和当前 GitHub 仓库内容。整理日期：2026-10-30。建议负责人只是提议，需要全组确认后再写进分工文档。</p>
+</header>
+
+<section>
+  <h2>结论</h2>
+  <div class="summary">
+    <div class="stat gap"><b>12</b><span>项中期要求在现有分工中没有负责人</span></div>
+    <div class="stat warn"><b>4</b><span>项现有约定与中期要求冲突，需要改</span></div>
+    <div class="stat ask"><b>5</b><span>个问题需要向组织方确认</span></div>
+    <div class="stat time"><b>10 天</b><span>距按协作规则冻结 <code>main</code>（11-09）</span></div>
+  </div>
+  <p><strong>2026-10-30 更新：</strong>建议由 P1 和 P5 负责的 7 项（G1、G3、G4、G9、G10 的材料部分、G11、C3）已写进 <code>docs/team_responsibilities.md</code>，页面中标为“已分配”。仍待认领或决定的是第 2、3 节中没有“已分配”标记的条目，也汇总在分工文档第 11.2 节。</p>
+  <p>现有分工是按正式比赛（Task 1 → 冻结 → Task 2A → Task 2B）设计的，各模块本身覆盖得比较完整。缺口集中在三类“没人认领的中间地带”：<strong>中期专用的仿真场地和 ArUco 标记</strong>（组织方明确不提供，要求各队自建）、<strong>Part 1 与 Part 2 之间的衔接</strong>（预建地图、给定目标坐标、计时内切换），以及<strong>结果验证材料</strong>（碰撞状态、距离曲线、演示当天的分工）。</p>
+</section>
+
+<section>
+  <h2>1. 中期要求与负责人对照</h2>
+  <p class="note">“仓库进度”只反映 2026-10-30 GitHub 上能看到的内容：<code>main</code> 和 P3 的 <code>feature/p3-visual-perception</code> 分支。本地未推送的工作看不到。</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:34%">中期要求（原文章节）</th><th style="width:16%">现有负责人</th><th style="width:12%">状态</th><th>仓库进度 / 说明</th></tr></thead>
+    <tbody>
+      <tr><td class="group" colspan="4">准备工作（第 2、3、7 节）</td></tr>
+      <tr><td>按图 1 自建 Gazebo 场地：外墙、W1/W1b/W2、O2/O3、起始区（§2、§7）</td><td>P1</td><td><span class="chip done">已分配 G1</span></td><td>现有世界是另一套布局，坐标以场地中心为原点</td></tr>
+      <tr><td>ArUco 标记与支架：DICT_4X4_50，ID 1=S1、ID 2=C1，0.16 m，中心离地 0.35 m，竖直、朝向指定方向（§3）</td><td>无</td><td><span class="chip gap">缺口 G2</span></td><td>P3 分支只有一个 0.15 m、ID 1 的测试标记，放在没有墙的测试世界里</td></tr>
+      <tr><td>中期参数与真值：S1/C1 坐标、半径、ID 与类型、起始区（§3）</td><td>P5</td><td><span class="chip done">已分配 G3</span></td><td><code>competition_parameters.yaml</code> 里是另一套开发值</td></tr>
+      <tr><td>两台机器人从起始区出发、互不碰撞（§2、§7）</td><td>P1</td><td><span class="chip done">已分配 C3</span></td><td>起点配置仍是旧坐标 (-1.5, -1.5)</td></tr>
+      <tr><td>检查 C1 能同时容纳两台机器人；两个标记能从可到达的位置看到（§7）</td><td>P1</td><td><span class="chip done">已分配 G4</span></td><td>相机离地约 0.10 m、水平视场 60°，看全 0.35 m 高的标记估计要离开 0.8 m 以上</td></tr>
+      <tr><td>Part 2 用的预建占据栅格地图（§5、§7）</td><td>无（SLAM 和地图质量归 P2）</td><td><span class="chip gap">缺口 G5</span></td><td>—</td></tr>
+      <tr><td class="group" colspan="4">Part 1：自主探索、SLAM 建图、目标检测（第 4 节）</td></tr>
+      <tr><td>至少一台机器人从起始区自主探索并实时建图</td><td>P2</td><td><span class="chip ok">已覆盖</span></td><td>仓库中暂未看到 P2 代码</td></tr>
+      <tr><td>开始前清空地图、探索状态和检测结果</td><td>P2（运行编排）、P3（目标注册表）</td><td><span class="chip ok">已覆盖</span></td><td>需要写进启动步骤</td></tr>
+      <tr><td>RViz2 显示地图并保存</td><td>P2</td><td><span class="chip ok">已覆盖</span></td><td>—</td></tr>
+      <tr><td>探索过程中相机必须看到 S1 和 C1</td><td>无（探索归 P2，检测归 P3）</td><td><span class="chip gap">缺口 G6</span></td><td>按激光前沿探索，地图建完时相机未必正对过竖直标记</td></tr>
+      <tr><td>记录每次检测：ID、目标类型、相机或机器人坐标系下的相对位置、检测时间；提供叠加图像或话题/日志</td><td>P3</td><td><span class="chip ok">已覆盖</span></td><td>P3 分支已有检测和多机器人融合；需补中期要求的记录格式</td></tr>
+      <tr><td class="group" colspan="4">Part 2：自主救援（第 5 节）</td></tr>
+      <tr><td>两台机器人在预建地图上定位、自主导航、避免一切碰撞</td><td>P1</td><td><span class="chip ok">已覆盖</span></td><td><code>main</code> 已有定位、导航、“到达并保持”动作和机器人互相避让（10 轮对向测试 20/20）</td></tr>
+      <tr><td>直接使用给定的 S1/C1 坐标作为任务输入</td><td>无</td><td><span class="chip gap">缺口 G7</span></td><td>现有架构里目标只来自 Task 1 冻结列表</td></tr>
+      <tr><td>按目标类型自动分配 1 台或 2 台机器人，状态自动转换</td><td>P4</td><td><span class="chip ok">已覆盖</span></td><td>仓库中暂未看到 P4 代码</td></tr>
+      <tr><td>完成判定：到目标中心水平距离 ≤ 0.5 m / 0.7 m，连续 10 s（仿真时间），离开即清零，C1 两台同时满足</td><td>P4（验证器）、P3（救援几何）</td><td><span class="chip warn">冲突 C1</span></td><td>现有约定是“救援区中心 ± 0.15 m、停留 3 s”</td></tr>
+      <tr><td>Part 1 → Part 2 的切换计入 13 分钟</td><td>无</td><td><span class="chip gap">缺口 G8</span></td><td>Part 1 结束时 robot_1 不在起始区</td></tr>
+      <tr><td class="group" colspan="4">结果验证（第 6、7 节）</td></tr>
+      <tr><td>展示保存的地图、两个标记的检测证据</td><td>P2、P3</td><td><span class="chip ok">已覆盖</span></td><td>—</td></tr>
+      <tr><td>S1、C1 的完成记录、机器人到目标的距离历史、完成标志</td><td>P5（材料）、P4（数据）</td><td><span class="chip done">已分配 G10</span></td><td>数据有人产生，但没人负责整理成 2 分钟内能展示的材料</td></tr>
+      <tr><td>碰撞状态记录</td><td>P1</td><td><span class="chip done">已分配 G9</span></td><td>—</td></tr>
+      <tr><td>13 分钟计时记录</td><td>P2（运行记录）</td><td><span class="chip part">部分覆盖 G10</span></td><td>—</td></tr>
+      <tr><td class="group" colspan="4">组织与流程</td></tr>
+      <tr><td>修改场地几何或目标坐标须事先与组织方商定（§7）</td><td>P5</td><td><span class="chip done">已分配 G11</span></td><td>—</td></tr>
+      <tr><td>演示当天操作、计时、讲解和应急分工</td><td>部分（完整演练 A = P2）</td><td><span class="chip part">部分覆盖 G10</span></td><td>—</td></tr>
+      <tr><td>成员姓名和备份人</td><td>全组</td><td><span class="chip gap">缺口 G12</span></td><td><code>config/team_assignments.yaml</code> 全部为空</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>2. 没有负责人的工作</h2>
+  <p class="note">A = 最终负责人（每项只能一个），R = 参与执行，C = 必须审核，沿用分工文档第 7 节的写法。</p>
+  <div class="items">
+
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G1</span><h3>中期仿真场地（Gazebo 世界）</h3><span class="chip done">已分配：P1</span></div>
+      <dl>
+        <dt>中期依据</dt><dd>§2、§3、§7：各队必须按图 1 自建场地，组织方不提供 Gazebo 世界。</dd>
+        <dt>为什么是缺口</dt><dd>世界文件所在的 <code>edgeai_robot_description</code> 包归 P1，但分工文档和 RACI 表都没有“比赛/中期场地”这一项交付物；开发计划里的“增加相机/ArUco仿真资源”也没有写负责人。</dd>
+        <dt>交付物</dt><dd><ul>
+          <li>5.0 m × 5.0 m 外墙（厚 0.1 m），W1 (0, 3.1)–(2.2, 3.1)、W1b (2.2, 3.1)–(2.2, 3.6)、W2 (3.4, 0)–(3.4, 2.8)，O2 中心 (2.2, 2.0) 0.6 × 1.0 m，O3 中心 (4.4, 3.6) 0.8 × 0.6 m。</li>
+          <li>坐标原点放在场地左下角，让 Gazebo 世界、地图和题目坐标一致（见 C3）。</li>
+          <li>启动参数可以切换旧开发世界和中期世界。</li>
+        </ul></dd>
+        <dt>建议</dt><dd class="owner">A = P1；C = P2、P3</dd>
+      </dl>
+    </article>
+
+    <article class="item">
+      <div class="item-head"><span class="item-id">G2</span><h3>ArUco 标记与支架模型</h3></div>
+      <dl>
+        <dt>中期依据</dt><dd>§3：DICT_4X4_50，S1 用 ID 1、C1 用 ID 2；印刷边长 0.16 m（不含白边），中心离地约 0.35 m；竖直装在独立支架上；S1 朝下方开阔区域，C1 朝北；目标参考点是支架正下方的地面点。</dd>
+        <dt>为什么是缺口</dt><dd>P3 负责“检测”，没人负责“把标记做进仿真”。P3 分支里只有一个 0.15 m、ID 1 的测试标记，测试世界里没有墙。</dd>
+        <dt>交付物</dt><dd><ul>
+          <li>ID 1、ID 2 两个标记模型（带白边），以及可复用的生成脚本（可在 P3 现有脚本上改）。</li>
+          <li>支架要能被 LiDAR 看到：LiDAR 扫描高度 0.155 m，比这低的底座激光看不见，导航可能撞上；支架的轮廓也要出现在 Part 2 的预建地图里。</li>
+          <li>按 §3 的位置和朝向放进 G1 的世界。</li>
+        </ul></dd>
+        <dt>建议</dt><dd class="owner">A = P3（标记模型与可检测性）；R = P1（放进世界、确认不阻碍导航）</dd>
+      </dl>
+    </article>
+
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G3</span><h3>中期参数与真值文件</h3><span class="chip done">已分配：P5</span></div>
+      <dl>
+        <dt>中期依据</dt><dd>§3 的参数表，以及 §6 验证时要比较的目标位置。</dd>
+        <dt>为什么是缺口</dt><dd>P5 负责“官方参数登记”，但中期这套参数没有人录入；P3 评测检测误差、P4 生成救援任务、验证展示都要用同一份真值。</dd>
+        <dt>交付物</dt><dd>一份带版本、注明来源和日期的配置：S1/C1 坐标与半径、ID 与类型、标记尺寸与高度、起始区、停留 10 s；各模块只从这里读取，不各自写死。</dd>
+        <dt>建议</dt><dd class="owner">A = P5；R = P1（保证与世界文件一致）；C = P3、P4</dd>
+      </dl>
+    </article>
+
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G4</span><h3>演示前可行性检查</h3><span class="chip done">已分配：P1</span></div>
+      <dl>
+        <dt>中期依据</dt><dd>§7 最后一条：检查两台机器人能同时安全停在 C1 范围内，两个竖直标记都能从可到达的位置看到。</dd>
+        <dt>为什么是缺口</dt><dd>这是跨模块的检查，涉及相机安装（P1）、检测距离（P3）和救援位姿（P3、P4），没有人被指定去做。</dd>
+        <dt>交付物</dt><dd><ul>
+          <li>C1 在 W2 和东墙之间，半径 0.7 m 内还有支架：给出两台机器人的停车位姿，并在仿真里实测能到达、不碰撞。</li>
+          <li>测出每个标记的可检测距离和角度范围（相机离地约 0.10 m，估计要离开 0.8 m 以上才能看全标记），必要时调整支架高度或相机俯仰（§3 允许调整支架）。</li>
+        </ul></dd>
+        <dt>建议</dt><dd class="owner">A = P1；R = P3</dd>
+      </dl>
+    </article>
+
+    <article class="item">
+      <div class="item-head"><span class="item-id">G5</span><h3>Part 2 预建地图</h3></div>
+      <dl>
+        <dt>中期依据</dt><dd>§5、§7：Part 2 可以使用各队事先准备的地图，组织方不提供。</dd>
+        <dt>为什么是缺口</dt><dd>P2 负责 SLAM 质量，P1 负责在地图上定位，但“中期地图”这个具体交付物没人认领。</dd>
+        <dt>交付物</dt><dd>中期场地的地图（PGM + YAML）提交到仓库，原点与场地坐标一致，包含支架轮廓；P1 在这张图上完成两台机器人的定位和导航验收。</dd>
+        <dt>建议</dt><dd class="owner">A = P2；R = P1</dd>
+      </dl>
+    </article>
+
+    <article class="item">
+      <div class="item-head"><span class="item-id">G6</span><h3>探索中保证相机看到 S1 和 C1</h3></div>
+      <dl>
+        <dt>中期依据</dt><dd>§4.1：探索建图期间，机载相机必须检测到两个标记。</dd>
+        <dt>为什么是缺口</dt><dd>探索归 P2、检测归 P3，但“让相机正对过两个标记”两边都不管。标记竖直、只朝一个方向，按激光前沿探索，可能地图建完了相机却从没正对过标记。P2 的输入里只写了“必要时 P3 提供观察视角建议”，没有落实。</dd>
+        <dt>交付物</dt><dd>探索策略中加入视觉覆盖（例如在前沿目标处原地转一圈，或地图建完后自动补看未覆盖的区域），并约定“两个标记都已检测到”是探索结束条件之一。</dd>
+        <dt>建议</dt><dd class="owner">A = P2；C = P3</dd>
+      </dl>
+    </article>
+
+    <article class="item">
+      <div class="item-head"><span class="item-id">G7</span><h3>Part 2 的目标输入（给定坐标）</h3></div>
+      <dl>
+        <dt>中期依据</dt><dd>§5：可以直接使用 S1 (1.0, 4.1)、C1 (4.1, 1.0) 的给定坐标，不需要重新识别。</dd>
+        <dt>为什么是缺口</dt><dd>现有架构里 P4 只从 P3 的 Task 1 冻结目标列表生成任务。Part 2 和 Part 1 独立，需要一个从配置读取给定坐标、发布同样格式目标的入口，没人负责。</dd>
+        <dt>交付物</dt><dd>从 G3 的配置生成目标列表和救援位姿（S1 一个、C1 两个，都在半径以内、避开支架），P4 无需改代码就能使用。</dd>
+        <dt>建议</dt><dd class="owner">A = P3（目标注册表本来就归 P3）；C = P4</dd>
+      </dl>
+    </article>
+
+    <article class="item">
+      <div class="item-head"><span class="item-id">G8</span><h3>Part 1 → Part 2 的切换流程</h3></div>
+      <dl>
+        <dt>中期依据</dt><dd>§4.2、§7：13 分钟从开始探索起算，切换时间也算在内；Part 2 两台机器人都要从起始区出发。</dd>
+        <dt>为什么是缺口</dt><dd>Part 1 结束时 robot_1 在场地某处。需要在计时内停止建图和探索、加载预建地图、让机器人回到起始区、两台都重新定位、启动救援协调。各步骤分属 P1、P2、P4，但没有人负责把它们串成一条命令并反复演练。</dd>
+        <dt>交付物</dt><dd>一个切换脚本或启动入口，以及计时演练记录（目标：切换不超过 1 分钟）。机器人能否在仿真里直接移回起始区，需要先问组织方（问题 1）。</dd>
+        <dt>建议</dt><dd class="owner">A = P2；R = P1、P4</dd>
+      </dl>
+    </article>
+
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G9</span><h3>碰撞状态记录</h3><span class="chip done">已分配：P1</span></div>
+      <dl>
+        <dt>中期依据</dt><dd>§5、§7：必须避免与其他机器人、墙、障碍物和支架碰撞；验证时要展示碰撞状态。</dd>
+        <dt>为什么是缺口</dt><dd>避障归 P1，但“证明没有碰撞”的记录没人负责。</dd>
+        <dt>交付物</dt><dd>在仿真中为机器人加接触检测，记录碰撞对象和时间（仿真时间），演示时能显示“本次运行碰撞 0 次”。</dd>
+        <dt>建议</dt><dd class="owner">A = P1；C = P4</dd>
+      </dl>
+    </article>
+
+    <article class="item warn">
+      <div class="item-head"><span class="item-id">G10</span><h3>结果验证材料与演示当天分工</h3><span class="chip done">材料已分配：P5</span><span class="chip gap">当天分工待定</span></div>
+      <dl>
+        <dt>中期依据</dt><dd>§6：2 分钟内展示地图、两个标记的检测证据、S1 和 C1 连续 10 s 的记录、距离历史、完成标志和碰撞状态。</dd>
+        <dt>现状</dt><dd>数据分别由 P2（地图、计时）、P3（检测）、P4（救援记录）产生，“完整演练”的 A 是 P2；但没人负责把它们汇总成 2 分钟内能讲完的一页材料或一个界面，也没定当天谁操作、谁计时、谁讲解、出问题谁处理。</dd>
+        <dt>交付物</dt><dd>验证展示方案（例如一个脚本，运行结束后生成地图图片、检测截图和距离—时间曲线）；中期运行手册；当天分工表。</dd>
+        <dt>建议</dt><dd class="owner">A = P5（验证材料与运行手册）；R = P2、P3、P4；当天总指挥 = P2</dd>
+      </dl>
+    </article>
+
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">G11</span><h3>与组织方的沟通</h3><span class="chip done">已分配：P5</span></div>
+      <dl>
+        <dt>中期依据</dt><dd>§7：修改场地几何或目标坐标必须事先与组织方商定。</dd>
+        <dt>为什么是缺口</dt><dd>P5 负责登记规则和 TBD，但没人被指定去问组织方、并把答复写回文档。第 4 节的问题需要尽快问。</dd>
+        <dt>建议</dt><dd class="owner">A = P5</dd>
+      </dl>
+    </article>
+
+    <article class="item">
+      <div class="item-head"><span class="item-id">G12</span><h3>成员姓名和备份人</h3></div>
+      <dl>
+        <dt>依据</dt><dd>分工文档开头和开发计划阶段 0：确认后在 <code>config/team_assignments.yaml</code> 填写姓名和备份人员。</dd>
+        <dt>现状</dt><dd>五个角色的 <code>primary</code> 和 <code>backup</code> 都还是空的。中期当天任何一人缺席，都没有指定的接替人。</dd>
+        <dt>建议</dt><dd class="owner">全组确认后由 P5 填写</dd>
+      </dl>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2>3. 与中期要求冲突、需要修改的现有约定</h2>
+  <div class="items">
+    <article class="item warn">
+      <div class="item-head"><span class="item-id">C1</span><h3>救援完成判定的语义</h3></div>
+      <dl>
+        <dt>现有约定</dt><dd>按救援区中心判定，容差 0.15 m，普通和协同停留都是 3 s（<code>competition_parameters.yaml</code> 开发值，<code>marker_and_rescue_geometry.md</code> 第 3 节）。</dd>
+        <dt>中期要求</dt><dd>按目标中心（支架正下方）判定：S1 半径 0.5 m，C1 半径 0.7 m；机器人 <code>base_footprint</code> 的水平距离；连续 10 s，用仿真时间计；离开即清零；C1 两台必须同时满足，可以先后到达。</dd>
+        <dt>需要改</dt><dd>P4 的 <code>rescue_verifier</code> 支持“目标中心 + 半径”判定；P3 的救援几何保证生成的位姿在半径内并避开支架；P5 录入中期参数版本。机器人端的“到达并保持”动作不用改，它不判定完成。</dd>
+        <dt>负责人</dt><dd class="owner">P4（A）、P3、P5；按分工文档第 8 节需 P3、P4、P5 共同批准</dd>
+      </dl>
+    </article>
+    <article class="item warn">
+      <div class="item-head"><span class="item-id">C2</span><h3>ArUco 尺寸和 ID 映射</h3></div>
+      <dl>
+        <dt>现有约定</dt><dd>标记 0.15 m；ID 1–3 是普通目标 T1–T3，ID 10 是协同目标 TC1。</dd>
+        <dt>中期要求</dt><dd>标记 0.16 m；ID 1 = S1（普通），<strong>ID 2 = C1（协同）</strong>。按现有映射，ID 2 会被当成普通目标。</dd>
+        <dt>负责人</dt><dd class="owner">P3（A）、P5 录入</dd>
+      </dl>
+    </article>
+    <article class="item assigned">
+      <div class="item-head"><span class="item-id">C3</span><h3>坐标原点与起点</h3><span class="chip done">已分配：P1（待 P2、P3 批准）</span></div>
+      <dl>
+        <dt>现有约定</dt><dd>仿真世界以场地中心为原点（−2.5 到 2.5）；起点 <code>task1_start</code> = (−1.5, −1.5)；<code>config/sim/robots.yaml</code> 的出生点也是这套坐标。</dd>
+        <dt>中期要求</dt><dd>以场地左下角为原点（0 到 5）；起始区 x ∈ [0, 1.4]、y ∈ [0, 1.0]；两台机器人在起始区内且不重叠。</dd>
+        <dt>建议</dt><dd>中期世界直接用题目坐标，让世界、地图和 S1/C1 坐标完全一致，省掉所有换算。按分工文档第 8 节，地图坐标需 P1、P2、P3 共同批准。</dd>
+        <dt>负责人</dt><dd class="owner">P1（世界、出生点、起点配置）；P2、P3 审核</dd>
+      </dl>
+    </article>
+    <article class="item warn">
+      <div class="item-head"><span class="item-id">C4</span><h3>分支与冻结规则</h3></div>
+      <dl>
+        <dt>现有约定</dt><dd><code>docs/team_collaboration.md</code>：直接推送到 <code>main</code>，里程碑前 3 天冻结，只用打了标签的版本。</dd>
+        <dt>现状</dt><dd>P3 的工作在单独分支 <code>feature/p3-visual-perception</code>（6 次提交，约 5000 行），还没合入 <code>main</code>；这个分支基于 10-24 的 <code>main</code>，之后 <code>main</code> 又有导航和避让更新。按规则 11-09 起冻结，合并要在那之前完成并通过联调。</dd>
+        <dt>需要决定</dt><dd>中期是否沿用 3 天冻结；P3 分支何时合并、由谁检查。</dd>
+      </dl>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2>4. 需要向组织方确认的问题</h2>
+  <ul class="plain">
+    <li><strong>问题 1：</strong>Part 1 结束后，能否在 13 分钟内直接在仿真里把机器人移回起始区（Gazebo 设置位姿或重启仿真）？还是必须让机器人自己开回去？</li>
+    <li><strong>问题 2：</strong>表中墙体坐标是墙的中心线还是内表面？5.0 m × 5.0 m 指内部尺寸还是外部尺寸？</li>
+    <li><strong>问题 3：</strong>Part 2 开始前，能否由操作员给出两台机器人的初始位姿（例如在 RViz 中设置）？题目说起点坐标和朝向“不作规定”。</li>
+    <li><strong>问题 4：</strong>目标中心在支架正下方，机器人无法停在中心。确认判定只看“距目标中心 ≤ 半径”，机器人停在支架前方即可。</li>
+    <li><strong>问题 5：</strong>Part 1 的检测证据中，相对位置用相机坐标系是否可以（题目写相机或机器人坐标系均可，确认是否需要换算到地图坐标）？</li>
+  </ul>
+</section>
+
+<section>
+  <h2>5. 建议时间安排</h2>
+  <p class="note">以协作规则的“里程碑前 3 天冻结”为准，有效开发时间只有约 10 天。</p>
+  <ol class="timeline">
+    <li><span class="d">11-01 前</span><span>全组确认本清单的负责人，填写 <code>team_assignments.yaml</code>，把第 4 节问题发给组织方</span></li>
+    <li><span class="d">11-03 前</span><span>中期世界、两个标记、坐标约定定稿（G1、G2、C3）；P3 分支合入 <code>main</code></span></li>
+    <li><span class="d">11-04 前</span><span>中期参数文件、预建地图、给定坐标目标入口（G3、G5、G7）；单机完成 S1</span></li>
+    <li><span class="d">11-06 前</span><span>Part 1 自主探索并检测到两个标记（G6）；Part 2 双机完成 C1（C1 冲突）</span></li>
+    <li><span class="d">11-08 前</span><span>切换流程、碰撞记录、验证材料（G8、G9、G10）；至少 3 次完整计时演练</span></li>
+    <li class="hard"><span class="d">11-09</span><span>打 <code>milestone-20261112</code> 标签，冻结 <code>main</code></span></li>
+    <li class="hard"><span class="d">11-12 上午</span><span>中期检查</span></li>
+  </ol>
+</section>
+
+<section>
+  <h2>6. 中期不要求、可以延后的工作</h2>
+  <ul class="plain">
+    <li>本地 LLM 和 Task 2B（P3 的自然语言解析，P4 的任务图验证和依赖调度）：§7 明确中期不要求 LLM 和完整端到端集成。</li>
+    <li>Task 1 原子冻结、Manifest、文件哈希（P2）：中期只要求保存并展示地图和检测证据。</li>
+    <li>双机器人协同建图：§4.1 只要求至少一台机器人探索，与 ADR-0001 一致。</li>
+    <li>实机接入（P1 阶段 5）：中期只在仿真中进行。</li>
+  </ul>
+  <p class="note">这些仍是正式比赛需要的工作，只是建议排在 11-12 之后，把这 10 天集中在上面的缺口上。</p>
+</section>
+
+<footer>依据文件：KTH_EdgeAI_Midterm_Check_Task_Description.docx（2026-10-30 放入仓库）、docs/team_responsibilities.md v0.1、docs/package_and_node_layout.md、docs/development_and_integration_plan.md、docs/marker_and_rescue_geometry.md v0.2、config/competition_parameters.yaml、config/team_assignments.yaml。仓库进度截至 2026-10-30。</footer>
+</div>
