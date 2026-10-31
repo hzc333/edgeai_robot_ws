@@ -44,6 +44,8 @@ class Journal:
         self.previous = self.read_snapshot()
         self.sequence = 0
         self.completed = set()
+        self.contacts = []
+        self.monitor_started = None
         events_path = self.directory / 'events.jsonl'
         if events_path.exists():
             raw = events_path.read_bytes()
@@ -63,6 +65,12 @@ class Journal:
                 self.sequence = max(self.sequence, event['seq'])
                 if event['type'] == 'COMPLETED':
                     self.completed.add(event['target_id'])
+                elif event['type'] == 'COLLISION':
+                    self.contacts.append({k: event[k] for k in (
+                        'sim_time', 'pair', 'sequence', 'physics_instance', 'physics_event_id')
+                        if k in event})
+                elif event['type'] == 'MONITOR_STARTED':
+                    self.monitor_started = event['sim_time']
                 offset += len(line)
             if raw and offset == len(raw) and not raw.endswith(b'\n'):
                 with events_path.open('ab') as stream:
@@ -100,6 +108,12 @@ class Journal:
         os.fsync(self.stream.fileno())
         if event['type'] == 'COMPLETED':
             self.completed.add(event['target_id'])
+        elif event['type'] == 'COLLISION':
+            self.contacts.append({k: event[k] for k in (
+                'sim_time', 'pair', 'sequence', 'physics_instance', 'physics_event_id')
+                if k in event})
+        elif event['type'] == 'MONITOR_STARTED':
+            self.monitor_started = event['sim_time']
         return event
 
     def sample(self, sample):

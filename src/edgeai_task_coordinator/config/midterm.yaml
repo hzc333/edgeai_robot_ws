@@ -43,4 +43,13 @@ engineering:
   completion_guard_s: 0.3
   # Explicit timeout on P1 ExecuteNavigationGoal (P1 uses wall-clock time).
   executor_timeout_wall_s: 240.0
+  recovery_stable_wall_s: 1.0
+  # P1 nav2_sim.yaml rectangular envelope; update together if robot geometry changes.
+  footprint_front_m: 0.115
+  footprint_rear_m: 0.315
+  footprint_half_width_m: 0.175
+  entry_clearance_m: 0.05
+  holding_position_tolerance_m: 0.12
+  holding_stable_s: 0.5
+  retry_backoff_s: 1.0
   # P4 does not own the shared 13-minute task clock. P2 must provide it.

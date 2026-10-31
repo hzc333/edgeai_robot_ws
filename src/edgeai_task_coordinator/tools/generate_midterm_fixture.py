@@ -66,6 +66,7 @@ def generate(output):
                      name=f'gz::sim::systems::{name}')
         if library == 'sensors':
             sub(plugin, 'render_engine', 'ogre2')
+    sub(world, 'plugin', filename='edgeai_p4_contacts', name='edgeai::Contacts')
     floor = sub(world, 'model', name='ground_plane')
     sub(floor, 'static', 'true')
     floor_link = sub(floor, 'link', name='link')
@@ -89,7 +90,9 @@ def generate(output):
         sub(sensor, 'always_on', 'true')
         sub(sensor, 'update_rate', 30)
         sub(sensor, 'topic', f'/p4_contacts/{name}')
-        sub(sub(sensor, 'contact'), 'collision', 'body_collision')
+        contact = sub(sensor, 'contact')
+        sub(contact, 'collision', 'body_collision')
+        sub(contact, 'topic', f'/p4_contacts/{name}')
         if stand:
             box(link, 'pole', 0.025, 0.025, 0.32,
                 pose='0 0 0.16 0 0 0', color='0.15 0.15 0.15 1')

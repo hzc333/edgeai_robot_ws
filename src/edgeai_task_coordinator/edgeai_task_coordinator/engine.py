@@ -16,8 +16,10 @@
 
 from dataclasses import dataclass, replace
 import hashlib
+import math
 
 from .planning import allocate
+from .scheduling import entry_conflict, footprint, polygon_gap
 from .verification import DwellVerifier
 
 
@@ -40,6 +42,8 @@ class Engine:
         self.completed = set(completed)
         self.index = 0
         self.attempts = {}
+        self.failures = {}
+        self.recovery_required = False
         self.assignment = ()
         self.slots = {}
         self.commands = []
@@ -52,6 +56,11 @@ class Engine:
         self.last_now = None
         self.task_id = ''
         self.distances = {}
+        self.dispatch_gate = ''
+        self.holding_since = {}
+        self.confirmed_parked = set()
+        self.retry_avoid = {}
+        self.retry_not_before = 0.0
 
     @property
     def target(self):
@@ -75,7 +84,7 @@ class Engine:
         if slot['state'] != 'sending':
             return
         slot['state'] = 'active' if accepted else 'ended'
-        if self.status == 'RELEASING' or self.status == 'HALTED':
+        if self.status in ('RELEASING', 'HALTED', 'RECOVERING'):
             if accepted:
                 self.commands.append(Command('cancel', slot['robot'], token, slot['index']))
         elif not accepted:
@@ -122,26 +131,79 @@ class Engine:
         if self.verifier.start is not None:
             self.emit('DWELL_RESET', now, reason)
         self.failure, self.retry = reason, retry
+        if retry:
+            tid = self.target.target_id
+            self.failures[tid] = self.failures.get(tid, 0) + 1
+            if len(self.assignment) == 1:
+                self.retry_avoid[tid] = list(self.assignment)
+            self.retry_not_before = now + self.config.settings.retry_backoff_s
         self.emit('FAILED', now, reason)
         self.release(now)
 
     def interrupt(self, reason, now):
-        """Freeze/reset/estop never automatically resumes an interrupted mission."""
+        """Cancel immediately; only the adapter may authorize safe re-entry."""
         if self.status == 'ACTIVE':
+            self.recovery_required = True
             self.fail(reason, now)
         elif self.status == 'RELEASING':
+            if self.target and self.target.target_id not in self.completed:
+                if self.retry and not self.recovery_required:
+                    tid = self.target.target_id
+                    self.failures[tid] = max(0, self.failures.get(tid, 0) - 1)
+                    self.retry_avoid.pop(tid, None)
+                self.recovery_required = True
             self.retry = False
             self.failure = self.failure or reason
+
+    def resume(self, now):
+        """Resume only after fresh phase, physics, idle and orphan-goal checks."""
+        if self.status != 'RECOVERING':
+            return
+        self.slots, self.assignment, self.commands = {}, (), []
+        self.verifier = DwellVerifier()
+        self.distances = {}
+        self.recovery_required = False
+        self.failure = ''
+        self.last_now = now
+        self.retry_not_before = now
+        self.status = 'WAITING'
+        self.holding_since.clear()
+        self.confirmed_parked.clear()
+        self.emit('RECOVERED', now)
+
+    def _parked(self, token, slot, robots):
+        robot = robots.get(slot['robot'])
+        return (slot['state'] == 'active' and robot and robot.mode == 4
+                and robot.active_task == self.task_id and robot.stationary()
+                and math.dist((robot.x, robot.y), self.target.slots[slot['index']][:2])
+                <= self.config.settings.holding_position_tolerance_m)
+
+    def can_enter(self, index, robots):
+        """Admit one mover only after every earlier reservation is stably parked."""
+        earlier = [(t, s) for t, s in self.slots.items() if s['index'] < index]
+        for token, slot in earlier:
+            robot = robots[slot['robot']]
+            since = self.holding_since.get(token)
+            if (not self._parked(token, slot, robots) or since is None
+                    or robot.stamp - since < self.config.settings.holding_stable_s):
+                self.dispatch_gate = 'WAITING_FOR_STABLE_PARKING:' + robot.robot_id
+                return False
+        slot = next(s for s in self.slots.values() if s['index'] == index)
+        robot = robots[slot['robot']]
+        peers = [r for rid, r in robots.items() if rid in self.config.robots
+                 and rid != robot.robot_id]
+        conflict = entry_conflict(self.target, index, robot, peers, self.config.settings)
+        if conflict:
+            self.dispatch_gate = 'ENTRY_OCCUPIED:' + conflict
+            return False
+        self.dispatch_gate = ''
+        return True
 
     def _send_next(self, now, robots):
         ordered = sorted(self.slots.items(), key=lambda pair: pair[1]['index'])
         for token, slot in ordered:
             if slot['state'] == 'queued':
-                previous = ordered[:slot['index']]
-                if any(p['state'] != 'active' or robots.get(p['robot']) is None
-                       or robots[p['robot']].mode != 4
-                       or robots[p['robot']].active_task != self.task_id
-                       for _, p in previous):
+                if not self.can_enter(slot['index'], robots):
                     return
                 slot['state'], slot['sent_at'] = 'sending', now
                 self.commands.append(Command('send', slot['robot'], token, slot['index']))
@@ -164,7 +226,10 @@ class Engine:
                 if self.target.target_id in self.completed:
                     self.index += 1
                     self.status = 'WAITING'
-                elif self.retry and self.attempts[self.target.target_id] < \
+                    self.recovery_required = False
+                elif self.recovery_required:
+                    self.status = 'RECOVERING'
+                elif self.retry and self.failures.get(self.target.target_id, 0) < \
                         self.config.settings.max_attempts and enabled:
                     self.status = 'WAITING'
                 else:
@@ -172,7 +237,7 @@ class Engine:
                 self.assignment, self.slots = (), {}
             elif now - self.releasing_at > self.config.settings.release_timeout_s:
                 self.failure = 'RELEASE_NOT_CONFIRMED'
-                self.status = 'HALTED'
+                self.status = 'RECOVERING' if self.recovery_required else 'HALTED'
                 self.emit('HALTED', now, self.failure)
             return
         if self.status == 'WAITING':
@@ -183,10 +248,20 @@ class Engine:
                 return
             if not enabled:
                 return
+            if now < self.retry_not_before:
+                self.dispatch_gate = 'RETRY_BACKOFF'
+                return
+            if not all(r in robots and robots[r].idle(now, self.config.settings.state_stale_s)
+                       for r in self.config.robots):
+                self.dispatch_gate = 'WAITING_FOR_IDLE_FLEET'
+                return
             available = {r: robots[r] for r in self.config.robots
                          if r in robots and robots[r].idle(now, self.config.settings.state_stale_s)}
-            assignment = allocate(available, self.target.slots, path_cost, self.target.approaches)
+            assignment = allocate(available, self.target.slots, path_cost, self.target.approaches,
+                                  self.config.settings.arrival_tolerance_m,
+                                  self.retry_avoid.get(self.target.target_id, ()))
             if assignment is None:
+                self.dispatch_gate = 'NO_REACHABLE_ASSIGNMENT'
                 return
             self.assignment = assignment
             attempt = self.attempts.get(self.target.target_id, 0) + 1
@@ -197,11 +272,27 @@ class Engine:
                           for i, r in enumerate(assignment)}
             self.started_at, self.failure, self.retry = now, '', False
             self.verifier = DwellVerifier()
+            self.holding_since.clear()
+            self.confirmed_parked.clear()
             self.status = 'ACTIVE'
             self.emit('ASSIGNED', now)
         if self.status != 'ACTIVE' or not enabled:
             return
         settings = self.config.settings
+        for rid in self.config.robots:
+            if rid not in robots or not robots[rid].healthy(now, settings.state_stale_s):
+                self.interrupt('FLEET_STATE_INVALID', now)
+                return
+            owned = any(s['robot'] == rid and s['state'] != 'queued'
+                        for s in self.slots.values())
+            if not owned and not robots[rid].idle(now, settings.state_stale_s):
+                self.interrupt('UNRESERVED_ROBOT_MOVING', now)
+                return
+        fleet = [robots[r] for r in self.config.robots]
+        if polygon_gap(*(footprint(r.x, r.y, r.yaw, settings) for r in fleet)) \
+                <= settings.entry_clearance_m:
+            self.interrupt('FLEET_CLEARANCE_LOST', now)
+            return
         for token, slot in self.slots.items():
             robot = robots.get(slot['robot'])
             if robot is None or not robot.healthy(now, settings.state_stale_s):
@@ -212,12 +303,20 @@ class Engine:
                 return
             if slot['state'] == 'sending' and now - slot['sent_at'] > \
                     settings.action_response_timeout_s:
-                self.fail('ACTION_RESPONSE_TIMEOUT', now)
+                self.fail('ACTION_RESPONSE_TIMEOUT', now, retry=True)
                 return
             if (slot['state'] in ('active', 'transit') and robot.mode != 4
                     and now - slot['sent_at'] > settings.navigation_timeout_s):
                 self.fail('NAVIGATION_TIMEOUT', now, retry=True)
                 return
+            if self._parked(token, slot, robots):
+                self.holding_since.setdefault(token, robot.stamp)
+                self.confirmed_parked.add(token)
+            else:
+                self.holding_since.pop(token, None)
+                if token in self.confirmed_parked:
+                    self.interrupt('PARKING_LOST', now)
+                    return
         if now - self.started_at > settings.partner_wait_timeout_s:
             self.fail('TASK_TIMEOUT', now, retry=True)
             return
@@ -258,4 +357,7 @@ class Engine:
                 'dwell_elapsed_s': self.verifier.elapsed,
                 'completed_targets': sorted(self.completed), 'failure': self.failure,
                 'assignment': list(self.assignment), 'attempts': dict(self.attempts),
+                'failures': dict(self.failures), 'recovery_required': self.recovery_required,
+                'dispatch_gate': self.dispatch_gate, 'retry_avoid': dict(self.retry_avoid),
+                'retry_not_before': self.retry_not_before,
                 'distances_m': dict(self.distances)}

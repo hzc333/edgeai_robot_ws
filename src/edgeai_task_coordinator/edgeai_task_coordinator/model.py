@@ -52,6 +52,14 @@ class Settings:
     allocation_clearance_m: float = 0.26
     completion_guard_s: float = 0.3
     executor_timeout_wall_s: float = 240.0
+    recovery_stable_wall_s: float = 1.0
+    footprint_front_m: float = 0.115
+    footprint_rear_m: float = 0.315
+    footprint_half_width_m: float = 0.175
+    entry_clearance_m: float = 0.05
+    holding_position_tolerance_m: float = 0.12
+    holding_stable_s: float = 0.5
+    retry_backoff_s: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -107,6 +115,9 @@ def load_configuration(path):
         targets.append(Target(tid, marker, center, radius, required, 10.0, slots, approaches))
     if len(targets) != 2 or {t.target_id for t in targets} != set(rules):
         raise ValueError('exactly S1 and C1 are required')
+    from .scheduling import validate_layout
+    for target in targets:
+        validate_layout(target, settings)
     return Configuration(robots, tuple(targets), settings)
 
 
@@ -125,10 +136,11 @@ class Robot:
     fault: bool = False
     linear: float = 0.0
     angular: float = 0.0
+    yaw: float = 0.0
 
     def healthy(self, now, stale):
         """Unknown/future/non-finite poses and unsafe modes cannot verify dwell."""
-        return (all(math.isfinite(v) for v in (self.stamp, self.x, self.y))
+        return (all(math.isfinite(v) for v in (self.stamp, self.x, self.y, self.yaw))
                 and -0.02 <= now - self.stamp <= stale and self.localized
                 and self.navigation_available and not self.fault
                 and self.mode in (1, 3, 4))
@@ -136,5 +148,9 @@ class Robot:
     def idle(self, now, stale):
         """Require confirmed standstill and a released action before reuse."""
         return (self.healthy(now, stale) and self.mode == 1 and not self.active_task
-                and math.isfinite(self.linear) and math.isfinite(self.angular)
+                and self.stationary())
+
+    def stationary(self):
+        """Measured standstill, without imposing an action mode."""
+        return (math.isfinite(self.linear) and math.isfinite(self.angular)
                 and abs(self.linear) <= 0.01 and abs(self.angular) <= 0.02)

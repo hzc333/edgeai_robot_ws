@@ -14,6 +14,7 @@
 
 """ROS adapter for the official midterm; never owns phase, TF or velocity."""
 
+from concurrent.futures import ThreadPoolExecutor
 import copy
 from dataclasses import asdict
 import hashlib
@@ -23,6 +24,7 @@ from pathlib import Path
 import time
 import uuid
 
+from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
 from ament_index_python.packages import get_package_share_directory
 from edgeai_common.config import load_runtime_contract
@@ -43,10 +45,13 @@ from rclpy.signals import SignalHandlerOptions
 from std_msgs.msg import String
 from unique_identifier_msgs.msg import UUID
 
+from .collision import CollisionState
 from .engine import Command, Engine
 from .evidence import Journal
 from .model import load_configuration, Robot
+from .physics import ContactFeed
 from .planning import GridCost
+from .scheduling import footprint, polygon_gap
 
 
 def seconds(stamp):
@@ -56,12 +61,17 @@ def seconds(stamp):
 def message_robot(msg):
     """Untrusted robot messages become finite map/base_footprint samples."""
     p = msg.pose.pose.position
+    q = msg.pose.pose.orientation
+    valid_q = (all(math.isfinite(v) for v in (q.x, q.y, q.z, q.w))
+               and abs(sum(v * v for v in (q.x, q.y, q.z, q.w)) - 1) <= 0.01)
+    yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
     return Robot(msg.robot_id, seconds(msg.header.stamp), p.x, p.y,
-                 localized=msg.localized and msg.header.frame_id == 'map',
+                 localized=msg.localized and msg.header.frame_id == 'map' and valid_q,
                  navigation_available=msg.navigation_available, mode=msg.mode,
                  active_task=msg.active_task_id,
                  fault=any(f.severity >= 2 for f in msg.faults),
-                 linear=msg.velocity.twist.linear.x, angular=msg.velocity.twist.angular.z)
+                 linear=msg.velocity.twist.linear.x, angular=msg.velocity.twist.angular.z,
+                 yaw=yaw)
 
 
 class Coordinator(Node):
@@ -78,6 +88,7 @@ class Coordinator(Node):
         self.declare_parameter('require_map', True)
         self.declare_parameter('test_mode', False)
         self.declare_parameter('request_finish', True)
+        self.declare_parameter('require_collision_monitor', True)
         if not self.has_parameter('use_sim_time'):
             self.declare_parameter('use_sim_time', True)
         if (not self.get_parameter('use_sim_time').value
@@ -86,7 +97,14 @@ class Coordinator(Node):
         if (not self.get_parameter('require_map').value
                 and not self.get_parameter('test_mode').value):
             raise ValueError('only test_mode may bypass the shared map requirement')
+        if (not self.get_parameter('require_collision_monitor').value
+                and not self.get_parameter('test_mode').value):
+            raise ValueError('only test_mode may bypass physical collision monitoring')
         self.config = load_configuration(self.get_parameter('config_file').value)
+        require_replay = self.get_parameter('require_collision_monitor').value
+        self.collision = CollisionState(self.config.robots, require_replay=require_replay)
+        self.contact_feed = (ContactFeed()
+                             if self.get_parameter('require_collision_monitor').value else None)
         self.config_hash = hashlib.sha256(json.dumps(asdict(self.config), sort_keys=True)
                                           .encode()).hexdigest()
         contract = load_runtime_contract(self.get_parameter('config_dir').value or None)
@@ -100,6 +118,8 @@ class Coordinator(Node):
             RescueEvent, '/edge/rescue_events', self.qos['event_stream'])
         self.status_pub = self.create_publisher(
             String, '/edge/midterm_rescue/status', self.qos['snapshot'])
+        self.collision_pub = self.create_publisher(
+            String, '/edge/midterm_rescue/collision', self.qos['snapshot'])
         self.create_subscription(CompetitionState, '/competition/state', self._on_phase,
                                  self.qos['control_state'])
         self.create_subscription(EmergencyStop, '/competition/estop', self._on_estop,
@@ -107,9 +127,11 @@ class Coordinator(Node):
         self.create_subscription(OccupancyGrid, '/map', self._on_map, self.qos['snapshot'])
         self.action_clients = {}
         self.cancel_clients = {}
+        self.result_clients = {}
         self.phase_client = self.create_client(SetCompetitionPhase, '/competition/set_phase')
         self.finish_request = 'NOT_REQUESTED'
         self.finish_future = None
+        self.safety_future = None
         for robot_id in self.config.robots:
             self.create_subscription(
                 RobotState, f'/{robot_id}/state',
@@ -121,12 +143,19 @@ class Coordinator(Node):
                 self.action_clients[(robot_id, kind)] = ActionClient(self, action_type, action)
                 self.cancel_clients[(robot_id, kind)] = self.create_client(
                     CancelGoal, action + '/_action/cancel_goal')
+                self.result_clients[(robot_id, kind)] = (
+                    self.create_client(action_type.Impl.GetResultService,
+                                       action + '/_action/get_result'),
+                    action_type.Impl.GetResultService)
         self.robots, self.raw_states = {}, {}
         self.phase = None
         self.phase_received = None
         self.estop_generation = -1
         self.estop = False
         self.grid = None
+        self.map_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='p4-map')
+        self.map_future = None
+        self.map_fingerprint = None
         self.engine = None
         self.journal = None
         self.identity = None
@@ -134,9 +163,17 @@ class Coordinator(Node):
         self.goal_records = {}
         self.cancel_pending = set()
         self.last_error = ''
+        self.transport_warning = ''
         self.last_sample = None
         self.recovered = False
         self.shutdown_requested = False
+        self.orphaned = set()
+        self.orphan_futures = {}
+        self.resume_after_sequence = -1
+        self.recovery_ready_since = None
+        self.recovery_gate = ''
+        self.last_ros_time = None
+        self.instance_id = uuid.uuid4().hex
         self.steady_clock = Clock(clock_type=ClockType.STEADY_TIME)
         self.timer = self.create_timer(0.1, self._tick, clock=self.steady_clock)
 
@@ -184,9 +221,22 @@ class Coordinator(Node):
                 or msg.info.width * msg.info.height != len(msg.data)):
             self.last_error = 'INVALID_MAP'
             return
-        self.grid = GridCost(msg.info.width, msg.info.height, msg.info.resolution,
-                             (msg.info.origin.position.x, msg.info.origin.position.y, yaw),
-                             msg.data, self.config.settings.allocation_clearance_m)
+        fingerprint = (tuple(values), msg.info.width, msg.info.height, hash(tuple(msg.data)))
+        if fingerprint == self.map_fingerprint:
+            return
+        self.map_fingerprint = fingerprint
+        self.grid = None
+        width, height, resolution = msg.info.width, msg.info.height, msg.info.resolution
+        origin = (msg.info.origin.position.x, msg.info.origin.position.y, yaw)
+        data = tuple(msg.data)
+        points = [p[:2] for t in self.config.targets for p in (*t.slots, *t.approaches)]
+
+        def prepare():
+            return GridCost(width, height, resolution, origin, data,
+                            self.config.settings.allocation_clearance_m).validate_parking(
+                                self.config.targets, self.config.settings).prepare(points)
+
+        self.map_future = self.map_worker.submit(prepare)
 
     def _enabled(self, now):
         p = self.phase
@@ -196,7 +246,10 @@ class Coordinator(Node):
                     and now > 0 and -0.1 <= now - seconds(p.header.stamp) <= 2.0
                     and time.monotonic() - self.phase_received <=
                     self.config.settings.phase_heartbeat_timeout_s
-                    and (self.grid is not None or not self.get_parameter('require_map').value))
+                    and (self.grid is not None or not self.get_parameter('require_map').value)
+                    and (self.contact_feed is None or (
+                        self.collision.snapshot(now, time.monotonic())['state'] == 'CLEAR'
+                        and not self.collision.count)))
 
     def _start(self):
         p = self.phase
@@ -206,22 +259,54 @@ class Coordinator(Node):
                          'target_source': 'official_midterm_coordinates',
                          'rule_source': 'KTH_EdgeAI_Midterm_Check_Task_Description.docx'}
         self.journal = Journal(self.get_parameter('output_dir').value, self.identity)
+        if self.journal.monitor_started is None:
+            self.journal.event({'type': 'MONITOR_STARTED', 'sim_time': self._now()})
+        self.collision.monitor_started = self.journal.monitor_started
         self.engine = Engine(self.config, p.run_id, self.journal.completed)
+        while self.engine.target and self.engine.target.target_id in self.engine.completed:
+            self.engine.index += 1
         previous = self.journal.previous
         if previous:
-            # Restarting never silently resumes a partly executed mission. Cancel
-            # only exact recorded UUIDs, not all actions on another owner's server.
+            self.collision.restore(previous.get('collision_history', {}))
+            self.engine.attempts = dict(previous.get('attempts', {}))
+            self.engine.failures = dict(previous.get('failures', {}))
+            self.engine.retry_avoid = dict(previous.get('retry_avoid', {}))
+            self.engine.retry_not_before = previous.get('retry_not_before', 0.0)
+            self.resume_after_sequence = previous.get('resume_after_sequence', -1)
             self.goal_records = previous.get('goals', {})
-            if previous['status'] not in ('DONE', 'WAITING') or self.goal_records:
+            if previous['status'] in ('ACTIVE', 'RELEASING', 'RECOVERING') or self.goal_records:
                 self.recovered = True
-                self.engine.status = 'HALTED'
-                self.engine.failure = 'RESTART_REQUIRES_NEW_RUN'
+                self.engine.status = 'RECOVERING'
+                self.engine.recovery_required = True
+                self.engine.failure = 'RESTART_CLEANUP'
+                self.orphaned = set(self.goal_records)
                 for token in self.goal_records:
+                    self.goal_records[token].pop('last_cancel', None)
+                    self.goal_records[token].pop('unknown_since', None)
                     self.cancel_pending.add(token)
+            elif previous['status'] == 'HALTED':
+                self.engine.status = 'HALTED'
+                self.engine.failure = previous.get('failure', 'PREVIOUS_FATAL_FAILURE')
+        if self.journal.contacts:
+            last = self.journal.contacts[-1]
+            instance = last.get('physics_instance', self.collision.observer_instance)
+            sequence = max((c.get('sequence', 0) for c in self.journal.contacts
+                            if c.get('physics_instance') == instance), default=0)
+            if instance == self.collision.observer_instance:
+                sequence = max(sequence, self.collision.last_sequence or 0)
+            self.collision.restore({**self.collision.history(),
+                                    'observer_instance': instance, 'last_sequence': sequence,
+                                    'count': len(self.journal.contacts),
+                                    'first': self.journal.contacts[0],
+                                    'last': self.journal.contacts[-1]})
         self.get_logger().info(f'P4 evidence: {self.journal.directory}')
 
     def _send(self, command):
-        if self.engine.target.approaches:
+        robot = self.robots.get(command.robot_id)
+        slot = self.engine.target.slots[command.slot]
+        already_parked = (robot and math.dist((robot.x, robot.y), slot[:2])
+                          <= self.config.settings.arrival_tolerance_m)
+        if self.engine.target.approaches and not already_parked:
             self._send_navigation(command)
         else:
             self._send_rescue(command)
@@ -274,8 +359,10 @@ class Coordinator(Node):
         try:
             handle = future.result()
         except Exception as error:
-            self.last_error = f'ACTION_TRANSPORT: {error}'
+            self.transport_warning = f'ACTION_TRANSPORT: {error}'
             self.cancel_pending.add(token)
+            self.orphaned.add(token)
+            self.engine.interrupt('ACTION_TRANSPORT_UNCERTAIN', self._now())
             return
         if handle.accepted:
             self.handles[token] = handle
@@ -285,7 +372,8 @@ class Coordinator(Node):
             self.goal_records.pop(token, None)
         callback = self.engine.transit_accepted if kind == 'navigation' else self.engine.accepted
         callback(token, handle.accepted, self._now())
-        if self.engine.status in ('RELEASING', 'HALTED') and handle.accepted:
+        if handle.accepted and (token not in self.engine.slots or
+                                self.engine.status in ('RELEASING', 'HALTED', 'RECOVERING')):
             self.cancel_pending.add(token)
 
     def _ended(self, token, future, kind):
@@ -319,6 +407,99 @@ class Coordinator(Node):
         record['last_cancel'] = time.monotonic()
         # Keep retrying until the action result and idle state confirm release.
         client.call_async(request)
+        if token in self.orphaned:
+            self._reconcile_orphan(token, record)
+
+    def _reconcile_orphan(self, token, record):
+        client, service_type = self.result_clients[
+            (record['robot_id'], record.get('kind', 'rescue'))]
+        future = self.orphan_futures.get(token)
+        if future is None and client.service_is_ready():
+            request = service_type.Request(goal_id=UUID(uuid=record['uuid']))
+            record['result_requested_wall'] = time.monotonic()
+            self.orphan_futures[token] = client.call_async(request)
+        elif future is not None and not future.done():
+            if time.monotonic() - record.get('result_requested_wall', 0) > 2.0:
+                future.cancel()
+                self.orphan_futures.pop(token, None)
+        elif future is not None and future.done():
+            response = future.result()
+            self.orphan_futures.pop(token, None)
+            terminal = response.status in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_ABORTED,
+                                           GoalStatus.STATUS_CANCELED)
+            # A write-ahead UUID may never have been sent. Require two UNKNOWN
+            # replies at least a wall second apart, then fresh idle state too.
+            if response.status == GoalStatus.STATUS_UNKNOWN:
+                first = record.setdefault('unknown_since', time.monotonic())
+                terminal = time.monotonic() - first >= 1.0
+            if terminal:
+                self.goal_records.pop(token, None)
+                self.cancel_pending.discard(token)
+                self.orphaned.discard(token)
+                self.engine.ended(token, self._now(), 'RECONCILED_ACTION_RESULT')
+
+    def _try_recover(self, now, enabled):
+        if self.engine.status != 'RECOVERING':
+            self.recovery_ready_since = None
+            self.recovery_gate = ''
+            return
+        if self.contact_feed is not None and self.collision.count:
+            self.recovery_gate = 'PHYSICAL_CONTACT_RECORDED'
+        elif self.contact_feed is not None and self.collision.snapshot(
+                now, time.monotonic())['state'] != 'CLEAR':
+            self.recovery_gate = 'WAITING_FOR_PHYSICS_OBSERVER'
+        elif not enabled or self.phase.phase_sequence <= self.resume_after_sequence:
+            self.recovery_gate = 'WAITING_FOR_TASK2A_AUTHORIZATION'
+        elif self.goal_records or self.handles:
+            self.recovery_gate = 'WAITING_FOR_OLD_ACTION_RESULTS'
+        elif not all(r in self.robots and self.robots[r].idle(
+                now, self.config.settings.state_stale_s) for r in self.config.robots):
+            self.recovery_gate = 'WAITING_FOR_FRESH_IDLE_ROBOTS'
+        elif polygon_gap(*(footprint(self.robots[r].x, self.robots[r].y,
+                                     self.robots[r].yaw, self.config.settings)
+                           for r in self.config.robots)) <= self.config.settings.entry_clearance_m:
+            self.recovery_gate = 'WAITING_FOR_FLEET_CLEARANCE'
+        elif not all(c.server_is_ready() for c in self.action_clients.values()):
+            self.recovery_gate = 'WAITING_FOR_ACTION_SERVERS'
+        else:
+            self.recovery_gate = 'CONFIRMING_STABLE_INPUTS'
+            if self.recovery_ready_since is None:
+                self.recovery_ready_since = time.monotonic()
+            if time.monotonic() - self.recovery_ready_since >= \
+                    self.config.settings.recovery_stable_wall_s:
+                self.engine.resume(now)
+                self.transport_warning = ''
+                self.recovery_gate = ''
+                self.resume_after_sequence = -1
+            return
+        self.recovery_ready_since = None
+
+    def _collision_tick(self, now):
+        if self.contact_feed:
+            if self.contact_feed.overflow:
+                self.collision.error = 'CONTACT_FRAME_QUEUE_OVERFLOW'
+            for frame in self.contact_feed.drain():
+                self.collision.ingest(*frame)
+        if self.journal:
+            while self.collision.events:
+                contact = self.collision.events[0]
+                event = dict(contact, type='COLLISION', target_id=(
+                    self.engine.target.target_id if self.engine.target else ''),
+                    task_id=self.engine.task_id, robot_ids=list(self.config.robots),
+                    dwell_elapsed_s=0.0, reason='PHYSICAL_CONTACT')
+                saved = self.journal.event(event)
+                self.collision.events.pop(0)
+                self._publish_event(saved)
+                self.get_logger().error('PHYSICAL CONTACT: ' + str(contact['pair']))
+            if (self.collision.count and self.safety_future is None
+                    and self.phase.phase == CompetitionState.PHASE_TASK2A
+                    and self.phase_client.service_is_ready()):
+                self.safety_future = self.phase_client.call_async(SetCompetitionPhase.Request(
+                    run_id=self.engine.run_id, requested_phase=CompetitionState.PHASE_FROZEN,
+                    requester_type=SetCompetitionPhase.Request.REQUESTER_SYSTEM,
+                    requester_node=self.get_fully_qualified_name(), reason='physical contact'))
+        snapshot = self.collision.snapshot(now, time.monotonic())
+        self.collision_pub.publish(String(data=json.dumps(snapshot, allow_nan=False)))
 
     def _now(self):
         return self.get_clock().now().nanoseconds / 1e9
@@ -355,6 +536,7 @@ class Coordinator(Node):
                  'COMPLETED': RescueEvent.EVENT_COMPLETED,
                  'FAILED': RescueEvent.EVENT_FAILED,
                  'HALTED': RescueEvent.EVENT_BLOCKED}
+        types['COLLISION'] = RescueEvent.EVENT_BLOCKED
         if event['type'] not in types:
             return
         msg = RescueEvent(run_id=self.engine.run_id, event_id=event['event_id'],
@@ -387,6 +569,7 @@ class Coordinator(Node):
                  else TaskReason.PHASE_CHANGED,
                  'RELEASE_NOT_CONFIRMED': TaskReason.SAFETY_STOP,
                  'CLOCK_REWIND': TaskReason.CONFIGURATION_INVALID}
+        codes['PHYSICAL_CONTACT'] = TaskReason.SAFETY_STOP
         code = codes.get(reason, TaskReason.INTERNAL_ERROR)
         if reason.startswith('ACTION_ENDED:'):
             code = int(reason.split(':', 2)[1])
@@ -417,6 +600,8 @@ class Coordinator(Node):
         if self.journal:
             self.journal.atomic('snapshot.json',
                                 dict(self.engine.snapshot(), goals=self.goal_records,
+                                     collision_history=self.collision.history(),
+                                     resume_after_sequence=self.resume_after_sequence,
                                      finish_request=self.finish_request))
 
     def _tick(self):
@@ -438,24 +623,43 @@ class Coordinator(Node):
 
     def _advance(self):
         now = self._now()
-        enabled = self._enabled(now)
-        if self.engine is None and enabled and self.phase.run_id and self.phase.map_id \
+        if self.map_future is not None and self.map_future.done():
+            self.grid = self.map_future.result()
+            self.map_future = None
+        if self.last_ros_time is not None and now < self.last_ros_time:
+            self.robots.clear()
+            self.raw_states.clear()
+        self.last_ros_time = now
+        if self.engine is None and now > 0 and self.phase \
+                and self.phase.run_id and self.phase.map_id \
                 and self.phase.map_revision > 0:
             self._start()
+        self._collision_tick(now)
+        enabled = self._enabled(now)
         if self.engine:
             if (self.phase.run_id, self.phase.map_id, self.phase.map_revision) != (
                     self.identity['run_id'], self.identity['map_id'],
                     self.identity['map_revision']):
                 self.last_error = 'RUN_OR_MAP_CHANGED_RESTART_REQUIRED'
                 enabled = False
+            if (self.phase.phase != CompetitionState.PHASE_TASK2A
+                    or self.phase.frozen or self.phase.estop_active or self.estop):
+                self.resume_after_sequence = max(self.resume_after_sequence,
+                                                 self.phase.phase_sequence)
             self.engine.tick(now, self.robots, enabled,
                              self.grid if self.grid is not None else math.dist)
+            if self.engine.failure == 'ACTION_RESPONSE_TIMEOUT':
+                for token in self.goal_records:
+                    if token not in self.handles:
+                        self.orphaned.add(token)
+                        self.cancel_pending.add(token)
             self._flush()
             if self.engine.status == 'ACTIVE' and enabled:
                 for token, slot in self.engine.slots.items():
                     robot = self.robots.get(slot['robot'])
                     if slot['state'] == 'transit_ready' and robot and robot.idle(
-                            now, self.config.settings.state_stale_s):
+                            now, self.config.settings.state_stale_s) and self.engine.can_enter(
+                                slot['index'], self.robots):
                         self.engine.rescue_requested(token, now)
                         self._send_rescue(Command('send', slot['robot'], token, slot['index']))
             for command in self.engine.drain_commands():
@@ -466,13 +670,20 @@ class Coordinator(Node):
             self._flush()
             for token in list(self.cancel_pending):
                 self._cancel(token)
+            self._try_recover(now, enabled)
+            self._save()
             if self.engine.status == 'DONE' and not self.goal_records:
                 self._request_finish()
             snapshot = dict(self.engine.snapshot(), sim_time=now, schema_version=1,
                             rule_profile=self.config.profile, identity=self.identity,
                             error=self.last_error, action_goals_outstanding=len(self.goal_records),
+                            transport_warning=self.transport_warning,
                             finish_request=self.finish_request,
-                            collision_status='external_verification_required')
+                            coordinator_instance=self.instance_id,
+                            recovery_gate=self.recovery_gate,
+                            collision_status=self.collision.snapshot(
+                                now, time.monotonic())['state'],
+                            collision=self.collision.snapshot(now, time.monotonic()))
             sample_key = (now, self.engine.task_id)
             if sample_key != self.last_sample:
                 self.journal.sample(snapshot)
@@ -493,6 +704,9 @@ class Coordinator(Node):
             self._cancel(token)
         if self.journal:
             self.journal.close()
+        if self.contact_feed:
+            self.contact_feed.close()
+        self.map_worker.shutdown(wait=False, cancel_futures=True)
         self.registry.destroy_node()
         self.verifier_node.destroy_node()
         self.destroy_node()

@@ -16,8 +16,11 @@
 
 import os
 from pathlib import Path
+import tempfile
+import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
+from edgeai_task_coordinator.physics import plugin_path
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -35,17 +38,27 @@ def _setup(context):
         return IncludeLaunchDescription(PythonLaunchDescriptionSource(str(path)),
                                         launch_arguments=arguments.items())
 
+    world = ET.parse(p4 / 'test_assets' / 'midterm.sdf')
+    world.find(".//plugin[@name='edgeai::Contacts']").set('filename', plugin_path())
+    with tempfile.NamedTemporaryFile(suffix='.sdf', prefix='p4-world-', delete=False) as stream:
+        world.write(stream, encoding='utf-8', xml_declaration=True)
+        world_path = stream.name
+
     actions = [
         include(description / 'launch' / 'sim_world.launch.py', {
-            'world': str(p4 / 'test_assets' / 'midterm.sdf'),
+            'world': world_path,
             'headless': LaunchConfiguration('headless').perform(context)}),
         include(navigation / 'launch' / 'dev_map_server.launch.py', {
             'map': str(p4 / 'test_assets' / 'midterm.yaml'), 'use_sim_time': 'true'}),
     ]
-    for robot_id, x in [('robot_1', 0.55), ('robot_2', 1.20)]:
+    for robot_id in ('robot_1', 'robot_2'):
+        start = LaunchConfiguration(robot_id + '_start').perform(context).split(',')
+        if len(start) != 3:
+            raise ValueError(robot_id + '_start must be x,y,yaw in metres/radians')
+        x, y, yaw = (str(float(v)) for v in start)
         actions += [
             include(description / 'launch' / 'sim_robot.launch.py', {
-                'robot_id': robot_id, 'x': str(x), 'y': '0.5', 'yaw': '0.0'}),
+                'robot_id': robot_id, 'x': x, 'y': y, 'yaw': yaw}),
             include(bringup / 'launch' / 'robot_stack.launch.py', {
                 'robot_id': robot_id, 'run_mode': 'development', 'config_dir': config,
                 'use_sim_time': 'true', 'require_competition_state': 'true', 'nav_mode': 'amcl'}),
@@ -57,5 +70,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('config_dir', default_value=os.environ.get('EDGEAI_CONFIG_DIR', '')),
         DeclareLaunchArgument('headless', default_value='true'),
+        DeclareLaunchArgument('robot_1_start', default_value='0.55,0.5,0.0'),
+        DeclareLaunchArgument('robot_2_start', default_value='1.20,0.5,0.0'),
         OpaqueFunction(function=_setup),
     ])

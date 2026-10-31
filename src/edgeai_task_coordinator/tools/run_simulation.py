@@ -15,6 +15,7 @@
 """Reproduce Part 2 with real Gazebo/Nav2/AMCL and an explicit P2 test stand-in."""
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -27,6 +28,7 @@ import time
 import uuid
 
 from generate_midterm_fixture import BOXES
+from simulation_driver import RemoteCoordinator
 
 
 def polygon(x, y, yaw, vertices):
@@ -49,6 +51,13 @@ def overlap(first, second):
 def run(args):
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
+    package = Path(__file__).resolve().parents[1]
+    sources = [*package.glob('edgeai_task_coordinator/*.py'),
+               *package.glob('config/*.yaml'), *package.glob('launch/*.py'),
+               *package.glob('tools/*.py'), *package.glob('gazebo_plugin/*.cc')]
+    (output / 'source_manifest.json').write_text(json.dumps({
+        str(p.relative_to(package)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(sources)}, indent=2))
     os.environ.update({
         'ROS_DOMAIN_ID': str(args.domain), 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'LOCALHOST',
         'ROS_LOG_DIR': str(output / 'ros-log'),
@@ -71,7 +80,7 @@ def run(args):
     from edgeai_common.config import find_config_dir, load_runtime_contract
     from edgeai_common.qos import qos_from_contract
     from edgeai_robot_interfaces.msg import CompetitionState, RobotPhaseAck
-    from edgeai_robot_interfaces.srv import Relocalize
+    from edgeai_robot_interfaces.srv import Relocalize, SetCompetitionPhase
     from gz.msgs10.contacts_pb2 import Contacts
     from gz.msgs10.pose_v_pb2 import Pose_V
     from gz.transport13 import Node as GzNode
@@ -82,7 +91,6 @@ def run(args):
     from rclpy.signals import SignalHandlerOptions
     import yaml
 
-    from edgeai_task_coordinator.coordinator import Coordinator
     from edgeai_task_coordinator.verification import DwellVerifier
     from edgeai_task_coordinator.model import Robot
 
@@ -92,26 +100,28 @@ def run(args):
     for name in ('competition_parameters.yaml', 'interface_runtime.yaml'):
         shutil.copyfile(source / name, config_dir / name)
     parameters = yaml.safe_load((config_dir / 'competition_parameters.yaml').read_text())
+    layouts = {
+        'nominal': [(0.55, 0.5, 0.0), (1.20, 0.5, 0.0)],
+        'swapped': [(1.20, 0.5, 0.0), (0.55, 0.5, 0.0)],
+        'staggered': [(0.55, 0.5, math.pi / 2), (1.20, 0.75, 0.0)],
+    }
+    starts = dict(zip(('robot_1', 'robot_2'), layouts[args.start_layout]))
     parameters['development']['localization']['start_poses'] = {
-        'p4_robot_1_start': {'x': 0.55, 'y': 0.5, 'yaw': 0.0},
-        'p4_robot_2_start': {'x': 1.20, 'y': 0.5, 'yaw': 0.0}}
+        f'p4_{rid}_start': dict(zip(('x', 'y', 'yaw'), pose)) for rid, pose in starts.items()}
     (config_dir / 'competition_parameters.yaml').write_text(yaml.safe_dump(parameters))
     launch_log = (output / 'launch.log').open('w')
     launch_command = [
         'ros2', 'launch', 'edgeai_task_coordinator', 'development_sim.launch.py',
         f'config_dir:={config_dir}', f'headless:={str(not args.gui).lower()}',
+        *(f'{rid}_start:=' + ','.join(str(v) for v in pose) for rid, pose in starts.items()),
     ]
     process = None
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
-    coordinator = Coordinator(parameter_overrides=[
-        Parameter('use_sim_time', value=True), Parameter('config_dir', value=str(config_dir)),
-        Parameter('output_dir', value=str(output / 'evidence')),
-    ])
     control = Node('p4_simulation_control', parameter_overrides=[
         Parameter('use_sim_time', value=True)])
+    coordinator = RemoteCoordinator(control, load_runtime_contract(config_dir), config_dir, output)
     executor = SingleThreadedExecutor()
-    for node in (coordinator, coordinator.registry, coordinator.verifier_node, control):
-        executor.add_node(node)
+    executor.add_node(control)
     qos = qos_from_contract(load_runtime_contract(config_dir), 'control_state')
     phase_pub = control.create_publisher(CompetitionState, '/competition/state', qos)
     run_id, map_id = 'p4-sim-' + uuid.uuid4().hex, 'official-midterm-fixture-v1'
@@ -128,6 +138,22 @@ def run(args):
         msg.header.stamp = control.get_clock().now().to_msg()
         phase_pub.publish(msg)
 
+    finish_requests = []
+
+    def set_phase(request, response):
+        nonlocal phase, sequence
+        response.accepted = (request.run_id == run_id
+                             and request.requested_phase == CompetitionState.PHASE_FROZEN)
+        if response.accepted:
+            finish_requests.append({'sim_time': control.get_clock().now().nanoseconds / 1e9,
+                                    'reason': request.reason})
+            if phase != CompetitionState.PHASE_FROZEN:
+                phase, sequence = CompetitionState.PHASE_FROZEN, sequence + 1
+            publish_phase()
+        response.current_phase, response.phase_sequence = phase, sequence
+        return response
+
+    control.create_service(SetCompetitionPhase, '/competition/set_phase', set_phase)
     # A steady timer maintains P1's wall-clock edge-connection watchdog even at low RTF.
     control.create_timer(0.2, publish_phase, clock=coordinator.steady_clock)
     truth = {}
@@ -180,6 +206,10 @@ def run(args):
     last_progress = started - 10
     last_truth_stamp = None
     success = False
+    recovery_injections = []
+    resume_at = None
+    freeze_injected = False
+    restart_injected = False
     try:
         process = subprocess.Popen(launch_command, stdout=launch_log, stderr=subprocess.STDOUT,
                                    start_new_session=True)
@@ -187,6 +217,8 @@ def run(args):
             executor.spin_once(timeout_sec=0.05)
             wall = time.monotonic()
             sim = control.get_clock().now().nanoseconds / 1e9
+            if coordinator.process.poll() is not None:
+                raise RuntimeError('P4 process exited; inspect coordinator.log')
             if process.poll() is not None:
                 raise RuntimeError('simulation launch exited; inspect launch.log')
             if wall - started > 30 and sim <= 0:
@@ -212,6 +244,25 @@ def run(args):
                     phase, sequence = CompetitionState.PHASE_TASK2A, 2
                     task_started = wall
                     publish_phase()
+            if args.exercise_recovery and coordinator.engine:
+                state = coordinator.engine.snapshot()
+                if (not freeze_injected and state.get('target_id') == 'S1'
+                        and state.get('dwell_elapsed_s', 0) >= 2):
+                    freeze_injected = True
+                    phase, sequence = CompetitionState.PHASE_FROZEN, sequence + 1
+                    publish_phase()
+                    resume_at = wall + 2
+                    recovery_injections.append({'kind': 'freeze_during_s1', 'sim_time': sim})
+                if resume_at is not None and wall >= resume_at:
+                    phase, sequence = CompetitionState.PHASE_TASK2A, sequence + 1
+                    publish_phase()
+                    resume_at = None
+                if (not restart_injected and state.get('target_id') == 'C1'
+                        and state.get('dwell_elapsed_s', 0) >= 2):
+                    restart_injected = True
+                    recovery_injections.append(dict(
+                        kind='sigkill_restart_during_c1', sim_time=sim,
+                        **coordinator.crash_restart()))
             with truth_lock:
                 positions = dict(truth)
             if len(positions) == 2:
@@ -252,12 +303,18 @@ def run(args):
                           else {'status': 'LOCALIZING'})
                 print(json.dumps({'wall_elapsed_s': round(wall - started, 1),
                                   'sim_time': round(sim, 2),
-                                  **status}), flush=True)
+                                  **{k: status.get(k) for k in (
+                                      'status', 'target_id', 'dwell_elapsed_s',
+                                      'attempts', 'failure', 'collision_status',
+                                      'recovery_gate', 'dispatch_gate')}}), flush=True)
                 last_progress = wall
             if coordinator.engine and coordinator.engine.status in ('DONE', 'HALTED'):
-                success = coordinator.engine.status == 'DONE'
-                break
-        phase, sequence = CompetitionState.PHASE_FROZEN, sequence + 1
+                success = (coordinator.engine.status == 'DONE'
+                           and coordinator.data.get('finish_request') == 'ACCEPTED')
+                if success or coordinator.engine.status == 'HALTED':
+                    break
+        if phase != CompetitionState.PHASE_FROZEN:
+            phase, sequence = CompetitionState.PHASE_FROZEN, sequence + 1
         publish_phase()
         end = time.monotonic() + 4
         while time.monotonic() < end:
@@ -279,18 +336,25 @@ def run(args):
             'run_mode': 'development_with_official_midterm_rescue_rules',
             'p1_transit_goal_timeout_wall_s': coordinator.config.settings.executor_timeout_wall_s,
             'run_id': run_id, 'map_id': map_id, 'robot_footprint_source': 'P1 nav2_sim.yaml',
+            'start_layout': args.start_layout, 'start_poses': starts,
             'p4_status': coordinator.engine.snapshot() if coordinator.engine else None,
             'error': coordinator.last_error, 'truth_completed': truth_completed,
             'wall_elapsed_s': time.monotonic() - started,
             'part2_wall_elapsed_s': time.monotonic() - task_started if task_started else None,
             'ground_truth_observed': sorted(observed_truth),
-            'physics_contact_sensor_topics_observed': sorted(observed_contacts),
+            'physics_contact_sensor_topics_observed': ['/edgeai/physics_contacts']
+            if coordinator.data.get('collision', {}).get('state') == 'CLEAR' else [],
+            'collision_observer': coordinator.data.get('collision', {}),
+            'recovery_injections': recovery_injections, 'finish_requests': finish_requests,
             'physics_contact_sensor_topics_advertised': sorted(contact_topics),
             'physics_contacts': contacts, 'footprint_envelope_overlaps': overlaps,
             'completion_after_truth_dwell_confirmed': timing_checked,
             'freeze_safe_confirmed': safe,
             'passed': (success and set(truth_completed) == {'S1', 'C1'} and timing_checked
-                       and not coordinator.last_error and not contacts and not overlaps and safe),
+                       and not coordinator.last_error and not contacts and not overlaps and safe
+                       and coordinator.data.get('collision', {}).get('state') == 'CLEAR'
+                       and not coordinator.data.get('collision', {}).get('ever_contact', True)
+                       and (not args.exercise_recovery or (freeze_injected and restart_injected))),
             'limitations': ['does not verify Part 1 detection/exploration',
                             'does not verify shared 13-minute whole-team timer',
                             'team production P2 phase/log pipeline still needs integration'],
@@ -307,6 +371,7 @@ def run(args):
         print(json.dumps(failure), flush=True)
         return 1
     finally:
+        coordinator.close()
         if process is not None:
             try:
                 os.killpg(process.pid, signal.SIGINT)
@@ -317,8 +382,6 @@ def run(args):
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-        coordinator.timer.cancel()
-        coordinator.close()
         control.destroy_node()
         executor.shutdown()
         rclpy.shutdown()
@@ -332,4 +395,7 @@ if __name__ == '__main__':
     parser.add_argument('--domain', type=int, default=73)
     parser.add_argument('--timeout-wall', type=float, default=900)
     parser.add_argument('--gui', action='store_true')
+    parser.add_argument('--exercise-recovery', action='store_true')
+    parser.add_argument('--start-layout', choices=['nominal', 'swapped', 'staggered'],
+                        default='nominal')
     raise SystemExit(run(parser.parse_args()))

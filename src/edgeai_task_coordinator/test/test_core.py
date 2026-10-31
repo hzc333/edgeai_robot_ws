@@ -176,8 +176,12 @@ def test_partner_is_reserved_and_sent_only_after_first_holds(config):
     engine.tick(1.1, robots, True, math.dist)
     assert engine.drain_commands() == []
     robots[first.robot_id] = replace(
-        robots[first.robot_id], mode=4, active_task=engine.task_id)
+        robots[first.robot_id], mode=4, active_task=engine.task_id,
+        x=engine.target.slots[0][0], y=engine.target.slots[0][1], yaw=-math.pi / 2)
     engine.tick(1.1, robots, True, math.dist)
+    assert not engine.drain_commands()
+    robots = {r: replace(s, stamp=1.7) for r, s in robots.items()}
+    engine.tick(1.7, robots, True, math.dist)
     second = engine.drain_commands()[0]
     assert second.robot_id != first.robot_id
     engine.accepted(second.token, False, 1.1)
@@ -219,7 +223,7 @@ def test_completion_survives_intentional_cancel_and_cannot_repeat(config):
     assert sum(e['type'] == 'COMPLETED' for e in engine.events) == 1
 
 
-def test_freeze_cancels_and_never_auto_retries(config):
+def test_freeze_cancels_until_adapter_authorizes_recovery(config):
     engine, robots = start_engine(config)
     command = engine.drain_commands()[0]
     engine.accepted(command.token, True, 1)
@@ -227,7 +231,10 @@ def test_freeze_cancels_and_never_auto_retries(config):
     assert engine.status == 'RELEASING'
     engine.ended(command.token, 1.1)
     engine.tick(1.2, robots, True, math.dist)
-    assert engine.status == 'HALTED'
+    assert engine.status == 'RECOVERING'
+    engine.resume(1.3)
+    assert engine.status == 'WAITING'
+    assert engine.verifier.elapsed == 0
 
 
 def test_navigation_through_circle_is_not_an_early_admission(config):
@@ -265,7 +272,8 @@ def test_old_result_token_cannot_fail_a_new_attempt(config):
     engine.accepted(old.token, False, 1.1)
     robots = {r: replace(s, stamp=1.2) for r, s in robots.items()}
     engine.tick(1.2, robots, True, math.dist)
-    engine.tick(1.3, robots, True, math.dist)
+    robots = {r: replace(s, stamp=2.2) for r, s in robots.items()}
+    engine.tick(2.2, robots, True, math.dist)
     assert engine.status == 'ACTIVE'
     assert engine.attempts['S1'] == 2
     engine.ended(old.token, 1.3)
@@ -300,3 +308,38 @@ def test_evidence_lock_and_partial_append_recovery(tmp_path):
     journal.close()
     lines = (directory / 'events.jsonl').read_text().splitlines()
     assert [json.loads(s)['seq'] for s in lines] == [1, 2]
+
+
+def test_prepared_distance_fields_match_astar_without_corner_cutting():
+    data = [0] * 144
+    for y in range(10):
+        data[y * 12 + 5] = 100
+    grid = GridCost(12, 12, 1.0, (0, 0, 0), data, clearance=0)
+    goal = (7.5, 2.5)
+    starts = [(3.5, 2.5), (2.5, 10.5), (5.5, 2.5)]
+    expected = [grid(start, goal) for start in starts]
+    grid.prepare([goal])
+    assert [grid(start, goal) for start in starts] == pytest.approx(expected)
+
+
+def test_already_parked_robot_can_resume_inside_conservative_allocation_clearance():
+    robots = {'robot_1': Robot('robot_1', 1, 1.0, 4.42)}
+    # Localization can put the parked center inside allocation inflation while
+    # its real footprint remains clear. No navigation is required at this slot.
+    assert allocate(robots, [(1.0, 4.45, 0)], lambda *_: math.inf,
+                    [(0.55, 4.45, 0)], parking_tolerance=0.06) == ('robot_1',)
+    assert allocate(robots, [(1.0, 4.45, 0)], lambda *_: math.inf,
+                    [(0.55, 4.45, 0)], parking_tolerance=0.01) is None
+
+
+def test_phase_result_race_does_not_consume_navigation_retry_budget(config):
+    engine, robots = start_engine(config)
+    command = engine.drain_commands()[0]
+    engine.accepted(command.token, True, 1)
+    engine.ended(command.token, 1.1, 'phase change result arrived first')
+    assert engine.failures['S1'] == 1
+    engine.interrupt('PHASE_OR_SAFETY_STOP', 1.1)
+    engine.interrupt('PHASE_OR_SAFETY_STOP', 1.2)
+    assert engine.failures['S1'] == 0
+    engine.tick(1.2, robots, False, math.dist)
+    assert engine.status == 'RECOVERING'

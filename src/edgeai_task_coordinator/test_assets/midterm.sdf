@@ -13,6 +13,7 @@
     <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
+    <plugin filename="edgeai_p4_contacts" name="edgeai::Contacts" />
     <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -62,6 +63,7 @@
           <topic>/p4_contacts/south</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/south</topic>
           </contact>
         </sensor>
       </link>
@@ -94,6 +96,7 @@
           <topic>/p4_contacts/north</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/north</topic>
           </contact>
         </sensor>
       </link>
@@ -126,6 +129,7 @@
           <topic>/p4_contacts/west</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/west</topic>
           </contact>
         </sensor>
       </link>
@@ -158,6 +162,7 @@
           <topic>/p4_contacts/east</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/east</topic>
           </contact>
         </sensor>
       </link>
@@ -190,6 +195,7 @@
           <topic>/p4_contacts/W1</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/W1</topic>
           </contact>
         </sensor>
       </link>
@@ -222,6 +228,7 @@
           <topic>/p4_contacts/W1b</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/W1b</topic>
           </contact>
         </sensor>
       </link>
@@ -254,6 +261,7 @@
           <topic>/p4_contacts/W2</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/W2</topic>
           </contact>
         </sensor>
       </link>
@@ -286,6 +294,7 @@
           <topic>/p4_contacts/O2</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/O2</topic>
           </contact>
         </sensor>
       </link>
@@ -318,6 +327,7 @@
           <topic>/p4_contacts/O3</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/O3</topic>
           </contact>
         </sensor>
       </link>
@@ -350,6 +360,7 @@
           <topic>/p4_contacts/S1_stand</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/S1_stand</topic>
           </contact>
         </sensor>
         <collision name="pole_collision">
@@ -854,6 +865,7 @@
           <topic>/p4_contacts/C1_stand</topic>
           <contact>
             <collision>body_collision</collision>
+            <topic>/p4_contacts/C1_stand</topic>
           </contact>
         </sensor>
         <collision name="pole_collision">

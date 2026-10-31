@@ -31,6 +31,19 @@ def audit(directory):
     lines = (directory / 'ground_truth.jsonl').read_text().splitlines()
     rows = [json.loads(line) for line in lines]
     completed = [e for e in events if e['type'] == 'COMPLETED']
+    collision_events = [e for e in events if e['type'] == 'COLLISION']
+    observer = report.get('collision_observer', {})
+    physics_valid = (observer.get('state') == 'CLEAR' and not observer.get('ever_contact', True)
+                     and observer.get('count') == 0
+                     and all(observer.get('coverage', {}).get(r, 0) > 0
+                             and r in observer.get('physics_alive', [])
+                             for r in ('robot_1', 'robot_2')))
+    injections = report.get('recovery_injections', [])
+    recovered = [e for e in events if e['type'] == 'RECOVERED']
+    recovery_valid = not injections or (
+        {i['kind'] for i in injections} == {'freeze_during_s1', 'sigkill_restart_during_c1'}
+        and len(recovered) >= 2
+        and not any(e['type'] == 'COMPLETED' and e['dwell_elapsed_s'] < 10 for e in completed))
     rules = {'S1': ((1.0, 4.1), 0.5, 1), 'C1': ((4.1, 1.0), 0.7, 2)}
     checks = []
     for target_id, (center, radius, count) in rules.items():
@@ -62,21 +75,28 @@ def audit(directory):
                        'maximum_distances_m': {r: max(v) if v else None
                                                for r, v in distances.items()},
                        'p4_recorded_dwell_s': event['dwell_elapsed_s']})
+    physics_replay = bool(observer.get('observer_instance')
+                          and observer.get('last_sequence') is not None)
     result = {
         'scope': 'Independent raw-Gazebo audit at each completion; sampled collision evidence',
         'run_id': report['run_id'], 'checks': checks,
         'footprint_overlap_samples': len(report['footprint_envelope_overlaps']),
         'physics_contact_messages': len(report['physics_contacts']),
-        'physics_sensor_delivery': ('observed' if report['physics_contact_sensor_topics_observed']
-                                    else 'not independently established; use footprint evidence'),
+        'physics_sensor_delivery': 'verified' if physics_valid else 'not established',
+        'collision_observer': observer, 'collision_events': len(collision_events),
+        'physics_history_replay': physics_replay,
+        'recovery_injections': injections, 'recovery_confirmed': recovery_valid,
+        'recovery_events': len(recovered),
         'freeze_safe_confirmed': report['freeze_safe_confirmed'],
         'part2_wall_elapsed_s': report['part2_wall_elapsed_s'],
         'raw_files_sha256': {
             str(p.relative_to(directory)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in (event_files[0], directory / 'ground_truth.jsonl')},
+            for p in (event_files[0], directory / 'ground_truth.jsonl',
+                      directory / 'source_manifest.json') if p.exists()},
         'passed': (all(c['passed'] for c in checks) and len(completed) == 2
                    and not report['footprint_envelope_overlaps']
                    and not report['physics_contacts'] and report['freeze_safe_confirmed']
+                   and physics_valid and not collision_events and recovery_valid
                    and report['p4_status']['status'] == 'DONE' and not report['error']),
     }
     (directory / 'audited_report.json').write_text(json.dumps(result, indent=2))
